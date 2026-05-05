@@ -146,6 +146,7 @@ func (s *PostgreSQLStore) Delete(ctx context.Context, providerName string) error
 	return nil
 }
 
+//nolint:dupl // SQLite and PostgreSQL List methods are structurally identical but use incompatible driver interfaces
 func (s *PostgreSQLStore) List(ctx context.Context) ([]*Token, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT provider_name, provider_type, access_token, refresh_token, expires_at,

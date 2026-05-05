@@ -160,7 +160,7 @@ func TestAnthropicProvider_FetchProfile(t *testing.T) {
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"account": map[string]any{
 				"uuid":            "acc-123",
 				"email":           "user@example.com",
