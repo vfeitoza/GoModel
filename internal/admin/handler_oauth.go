@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,12 @@ import (
 	"gomodel/internal/oauthusage"
 	"gomodel/internal/providers"
 )
+
+// anthropicManualCallbackURI is the Anthropic-hosted callback page accepted by
+// the public client ID. Used in remote mode when GoModel cannot receive the
+// redirect directly. The user copies the resulting URL and submits it via the
+// dashboard's manual callback endpoint.
+const anthropicManualCallbackURI = "https://platform.claude.com/oauth/code/callback"
 
 // OAuthProviderStatus is the admin-facing view of a single OAuth provider.
 type OAuthProviderStatus struct {
@@ -63,19 +70,21 @@ type OAuthUsageResponse struct {
 
 // oauthFlowState holds in-progress PKCE state for a pending OAuth flow.
 type oauthFlowState struct {
-	verifier     string
-	state        string
-	providerName string
-	providerType string
-	callbackPort int
-	server       *oauth.CallbackServer
-	createdAt    time.Time
+	verifier        string
+	state           string
+	providerName    string
+	providerType    string
+	redirectURI     string            // full redirect URI used in AuthorizationURL
+	exchangeURI     string            // redirect URI to use in token exchange (may differ)
+	callbackPort    int               // non-zero only for local callback server mode
+	server          *oauth.CallbackServer // non-nil only for local callback server mode
+	createdAt       time.Time
 }
 
 // OAuthHandler handles OAuth-related admin endpoints.
 type OAuthHandler struct {
-	store              oauthstore.Store
-	usageFetcher       *oauthusage.CachingFetcher
+	store               oauthstore.Store
+	usageFetcher        *oauthusage.CachingFetcher
 	configuredProviders []providers.SanitizedProviderConfig
 
 	flowMu  sync.Mutex
@@ -97,6 +106,7 @@ func (h *OAuthHandler) RegisterOAuthRoutes(g RouteRegistrar) {
 	g.GET("/oauth/providers", h.ListOAuthProviders)
 	g.POST("/oauth/start", h.StartOAuth)
 	g.GET("/oauth/callback", h.OAuthCallback)
+	g.POST("/oauth/callback-manual", h.OAuthCallbackManual)
 	g.POST("/oauth/revoke", h.RevokeOAuth)
 	g.GET("/oauth/usage/:provider_name", h.GetOAuthUsage)
 	g.GET("/oauth/status/:provider_name", h.GetOAuthStatus)
@@ -147,14 +157,16 @@ func (h *OAuthHandler) StartOAuth(c *echo.Context) error {
 		return handleError(c, fmt.Errorf("generate state: %w", err))
 	}
 
-	// Start callback server
+	// Start local callback server (works when browser and server are on the same machine).
 	fallbackPorts := []int{54546, 54547, 54548, 54549, 54550}
 	cs, actualPort, err := oauth.TryCallbackPorts(oauth.DefaultCallbackPort, fallbackPorts...)
 	if err != nil {
 		return handleError(c, fmt.Errorf("start OAuth callback server: %w", err))
 	}
+	localRedirectURI := oauth.LocalCallbackURI(actualPort)
 
-	// Store flow state
+	// Store flow state with both local and manual redirect URIs.
+	// completeOAuthFlow will use whichever path completes first.
 	h.flowMu.Lock()
 	h.cleanExpiredFlows()
 	h.flows[state] = &oauthFlowState{
@@ -162,23 +174,28 @@ func (h *OAuthHandler) StartOAuth(c *echo.Context) error {
 		state:        state,
 		providerName: req.ProviderName,
 		providerType: provCfg.Type,
+		redirectURI:  localRedirectURI,
+		exchangeURI:  localRedirectURI,
 		callbackPort: actualPort,
 		server:       cs,
 		createdAt:    time.Now(),
 	}
 	h.flowMu.Unlock()
 
-	// Build authorization URL
+	// Build two authorization URLs: one for local callback, one for manual flow.
 	oauthProv := oauth.NewAnthropicProvider()
-	authURL := oauthProv.AuthorizationURL(state, pkce.Verifier, actualPort)
+	authURL := oauthProv.AuthorizationURL(state, pkce.Verifier, localRedirectURI)
+	manualAuthURL := oauthProv.AuthorizationURL(state, pkce.Verifier, anthropicManualCallbackURI)
 
-	// Wait for callback in background
+	// Wait for local callback in background.
 	go h.waitForCallback(state)
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"auth_url":      authURL,
-		"state":         state,
-		"callback_port": actualPort,
+		"auth_url":        authURL,
+		"manual_auth_url": manualAuthURL,
+		"manual_uri":      anthropicManualCallbackURI,
+		"state":           state,
+		"callback_port":   actualPort,
 	})
 }
 
@@ -204,7 +221,7 @@ func (h *OAuthHandler) OAuthCallback(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if err := h.completeOAuthFlow(ctx, flow, code, state); err != nil {
+	if err := h.completeOAuthFlow(ctx, flow, code, state, flow.exchangeURI); err != nil {
 		slog.Error("oauth callback: flow completion failed", "provider", flow.providerName, "error", err)
 		return c.HTML(http.StatusInternalServerError, oauthErrorHTML("authentication failed: "+err.Error()))
 	}
@@ -214,6 +231,78 @@ func (h *OAuthHandler) OAuthCallback(c *echo.Context) error {
 	h.flowMu.Unlock()
 
 	return c.HTML(http.StatusOK, oauthSuccessHTML())
+}
+
+// OAuthCallbackManual handles the manual callback flow for remote servers.
+// The user pastes the full callback URL (or just the code) from the Anthropic
+// callback page into the dashboard, which POSTs it here.
+// Body: {"callback_url": "https://console.anthropic.com/oauth/code/callback?code=...&state=..."}
+//    or {"code": "...", "state": "..."}
+func (h *OAuthHandler) OAuthCallbackManual(c *echo.Context) error {
+	var req struct {
+		CallbackURL string `json:"callback_url"`
+		Code        string `json:"code"`
+		State       string `json:"state"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, fmt.Errorf("invalid request body: %w", err))
+	}
+
+	// Extract code and state from URL if provided, otherwise treat as raw code.
+	if req.CallbackURL != "" {
+		trimmed := strings.TrimSpace(req.CallbackURL)
+		if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+			parsed, err := url.Parse(trimmed)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid callback URL"})
+			}
+			if e := parsed.Query().Get("error"); e != "" {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "OAuth error: " + e})
+			}
+			if c := parsed.Query().Get("code"); c != "" {
+				req.Code = c
+			}
+			if s := parsed.Query().Get("state"); s != "" {
+				req.State = s
+			}
+		} else {
+			// Treat as raw authorization code.
+			req.Code = trimmed
+		}
+	}
+
+	req.Code = strings.TrimSpace(req.Code)
+	req.State = strings.TrimSpace(req.State)
+
+	if req.Code == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "code is required"})
+	}
+	if req.State == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "state is required"})
+	}
+
+	h.flowMu.Lock()
+	flow, ok := h.flows[req.State]
+	h.flowMu.Unlock()
+
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "invalid or expired OAuth state — please start the authentication flow again",
+		})
+	}
+
+	ctx := c.Request().Context()
+	if err := h.completeOAuthFlow(ctx, flow, req.Code, req.State, anthropicManualCallbackURI); err != nil {
+		slog.Error("oauth manual callback: flow completion failed", "provider", flow.providerName, "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.flowMu.Lock()
+	delete(h.flows, req.State)
+	h.flowMu.Unlock()
+
+	slog.Info("oauth: manual callback completed", "provider", flow.providerName)
+	return c.JSON(http.StatusOK, map[string]string{"status": "authenticated"})
 }
 
 // RevokeOAuth removes the stored OAuth token for a provider.
@@ -371,7 +460,7 @@ func (h *OAuthHandler) waitForCallback(state string) {
 		return
 	}
 
-	if err := h.completeOAuthFlow(ctx, flow, result.Code, result.State); err != nil {
+	if err := h.completeOAuthFlow(ctx, flow, result.Code, result.State, flow.exchangeURI); err != nil {
 		slog.Error("oauth: flow completion failed (background)", "provider", flow.providerName, "error", err)
 	}
 
@@ -380,10 +469,10 @@ func (h *OAuthHandler) waitForCallback(state string) {
 	h.flowMu.Unlock()
 }
 
-func (h *OAuthHandler) completeOAuthFlow(ctx context.Context, flow *oauthFlowState, code, state string) error {
+func (h *OAuthHandler) completeOAuthFlow(ctx context.Context, flow *oauthFlowState, code, state, exchangeURI string) error {
 	oauthProv := oauth.NewAnthropicProvider()
 
-	tokens, err := oauthProv.ExchangeCode(ctx, code, flow.verifier, state, flow.callbackPort)
+	tokens, err := oauthProv.ExchangeCode(ctx, code, flow.verifier, state, exchangeURI)
 	if err != nil {
 		return fmt.Errorf("exchange code: %w", err)
 	}

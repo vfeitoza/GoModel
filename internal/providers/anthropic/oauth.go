@@ -13,6 +13,7 @@ import (
 	"gomodel/internal/oauthstore"
 )
 
+
 // oauthState holds the runtime OAuth state for a provider instance.
 type oauthState struct {
 	mu           sync.Mutex
@@ -80,12 +81,17 @@ func (s *oauthState) getValidAccessToken(ctx context.Context) (string, error) {
 }
 
 // setOAuthHeader sets the Authorization header using the stored OAuth token.
-// On error it logs and leaves the header unset so the upstream will return 401,
-// which is more informative than a silent failure.
+// If the token is unavailable (e.g. revoked), it cancels the request context
+// so the llmclient aborts the upstream call immediately.
 func (p *Provider) setOAuthHeader(req *http.Request) {
 	token, err := p.oauth.getValidAccessToken(req.Context())
 	if err != nil {
 		slog.Error("oauth: cannot obtain access token", "provider", p.oauth.providerName, "error", err)
+		// Store the error in the request context so callers can surface it,
+		// then cancel the context to abort the upstream HTTP call.
+		ctx, cancel := context.WithCancelCause(req.Context())
+		cancel(err)
+		*req = *req.WithContext(ctx)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)

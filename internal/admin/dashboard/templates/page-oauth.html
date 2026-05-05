@@ -64,7 +64,16 @@
                                 :disabled="oauthActiveProvider === provider.provider_name"
                                 type="button">
                             <i data-lucide="log-in" aria-hidden="true"></i>
-                            <span x-text="oauthActiveProvider === provider.provider_name ? 'Authenticating...' : (provider.status === 'expired' ? 'Re-authenticate' : 'Authenticate')"></span>
+                            <span x-text="oauthActiveProvider === provider.provider_name && !oauthManualProvider ? 'Authenticating...' : (provider.status === 'expired' ? 'Re-authenticate' : 'Authenticate')"></span>
+                        </button>
+                        <!-- Manual flow button (shown while waiting for local callback) -->
+                        <button class="pagination-btn pagination-btn-with-icon"
+                                x-show="(!provider.authenticated || provider.status === 'expired') && oauthActiveProvider !== provider.provider_name"
+                                @click="oauthAuthenticateManual(provider.provider_name)"
+                                type="button"
+                                style="font-size:.78rem">
+                            <i data-lucide="link" aria-hidden="true"></i>
+                            Remote
                         </button>
                         <!-- Disconnect button -->
                         <button class="pagination-btn pagination-btn-danger-outline pagination-btn-with-icon"
@@ -75,6 +84,28 @@
                             <i data-lucide="log-out" aria-hidden="true"></i>
                             <span x-text="oauthRevokingProvider === provider.provider_name ? 'Disconnecting...' : 'Disconnect'"></span>
                         </button>
+                    </div>
+                </div>
+
+                <!-- Manual callback input (remote mode) -->
+                <div x-show="oauthManualProvider === provider.provider_name"
+                     style="margin-top:.6rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface)">
+                    <p style="font-size:.8rem;margin:0 0 .4rem;opacity:.8">
+                        After authorizing, copy the full URL from the browser address bar and paste it below:
+                    </p>
+                    <div style="display:flex;gap:.4rem;align-items:center">
+                        <input type="text"
+                               x-model="oauthManualInput"
+                               placeholder="https://console.anthropic.com/oauth/code/callback?code=...&state=..."
+                               style="flex:1;font-size:.78rem;padding:.3rem .5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text)"
+                               @keydown.enter="oauthSubmitManual(provider.provider_name)" />
+                        <button class="pagination-btn pagination-btn-primary"
+                                @click="oauthSubmitManual(provider.provider_name)"
+                                :disabled="!oauthManualInput.trim()"
+                                type="button">Confirm</button>
+                        <button class="pagination-btn"
+                                @click="oauthCancelManual(provider.provider_name)"
+                                type="button">Cancel</button>
                     </div>
                 </div>
 

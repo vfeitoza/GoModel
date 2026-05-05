@@ -56,9 +56,8 @@ func NewAnthropicProviderWithClient(client *http.Client) *AnthropicProvider {
 
 // AuthorizationURL builds the Anthropic OAuth authorization URL.
 // Parameter order matches the reference implementation (cligate/claude-oauth.js).
-func (p *AnthropicProvider) AuthorizationURL(state, verifier string, callbackPort int) string {
+func (p *AnthropicProvider) AuthorizationURL(state, verifier, redirectURI string) string {
 	challenge := deriveChallenge(verifier)
-	redirectURI := callbackURI(callbackPort)
 
 	// Build params in the exact order used by the reference Claude OAuth client.
 	// url.Values.Encode() sorts alphabetically which may differ from what the
@@ -77,9 +76,7 @@ func (p *AnthropicProvider) AuthorizationURL(state, verifier string, callbackPor
 
 // ExchangeCode exchanges an authorization code for tokens.
 // Claude requires state in the token exchange body (non-standard).
-func (p *AnthropicProvider) ExchangeCode(ctx context.Context, code, verifier, state string, callbackPort int) (*TokenResponse, error) {
-	redirectURI := callbackURI(callbackPort)
-
+func (p *AnthropicProvider) ExchangeCode(ctx context.Context, code, verifier, state, redirectURI string) (*TokenResponse, error) {
 	body := map[string]string{
 		"grant_type":    "authorization_code",
 		"code":          code,
@@ -258,9 +255,15 @@ func (p *AnthropicProvider) postJSON(ctx context.Context, endpoint string, body 
 	return p.httpClient.Do(req)
 }
 
+// LocalCallbackURI builds the local redirect URI for the given port.
+// Use this when GoModel is running on the same machine as the browser.
+func LocalCallbackURI(port int) string {
+	return fmt.Sprintf("http://localhost:%d/callback", port)
+}
+
 // callbackURI builds the local redirect URI for the given port.
 func callbackURI(port int) string {
-	return fmt.Sprintf("http://localhost:%d/callback", port)
+	return LocalCallbackURI(port)
 }
 
 // splitScopes splits a space-separated scope string into a slice.

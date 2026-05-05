@@ -49,7 +49,7 @@ func TestAnthropicProvider_AuthorizationURL(t *testing.T) {
 	pair, err := oauth.NewPKCEPair()
 	require.NoError(t, err)
 
-	authURL := p.AuthorizationURL("test-state", pair.Verifier, 54545)
+	authURL := p.AuthorizationURL("test-state", pair.Verifier, oauth.LocalCallbackURI(54545))
 
 	assert.Contains(t, authURL, "claude.ai/oauth/authorize")
 	assert.Contains(t, authURL, oauth.AnthropicClientID)
@@ -82,7 +82,7 @@ func TestAnthropicProvider_ExchangeCode(t *testing.T) {
 	defer srv.Close()
 
 	p := oauth.NewAnthropicProviderWithTestTokenURL(srv.URL)
-	resp, err := p.ExchangeCode(context.Background(), "test-code", "test-verifier", "test-state", 54545)
+	resp, err := p.ExchangeCode(context.Background(), "test-code", "test-verifier", "test-state", oauth.LocalCallbackURI(54545))
 	require.NoError(t, err)
 
 	assert.Equal(t, "access-abc", resp.AccessToken)
@@ -100,7 +100,7 @@ func TestAnthropicProvider_ExchangeCode_Error(t *testing.T) {
 	defer srv.Close()
 
 	p := oauth.NewAnthropicProviderWithTestTokenURL(srv.URL)
-	_, err := p.ExchangeCode(context.Background(), "bad-code", "verifier", "state", 54545)
+	_, err := p.ExchangeCode(context.Background(), "bad-code", "verifier", "state", oauth.LocalCallbackURI(54545))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "401")
 }

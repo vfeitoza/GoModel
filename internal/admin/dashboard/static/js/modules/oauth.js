@@ -8,6 +8,9 @@
             oauthUsageLoading: {},
             oauthActiveProvider: '',
             oauthRevokingProvider: '',
+            oauthManualState: '',       // state token for pending manual flow
+            oauthManualProvider: '',    // provider name waiting for manual callback
+            oauthManualInput: '',       // user-pasted callback URL
             oauthErrors: {},
             oauthGlobalError: '',
 
@@ -56,6 +59,9 @@
                 if (this.oauthActiveProvider) return;
                 this.oauthActiveProvider = providerName;
                 this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: '' });
+                this.oauthManualState = '';
+                this.oauthManualProvider = '';
+                this.oauthManualInput = '';
 
                 try {
                     const body = JSON.stringify({ provider_name: providerName });
@@ -92,8 +98,94 @@
                     console.error('OAuth authentication failed:', err);
                     this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: err.message || 'Authentication failed.' });
                 } finally {
+                    if (!this.oauthManualProvider) {
+                        this.oauthActiveProvider = '';
+                    }
+                }
+            },
+
+            async oauthSubmitManual(providerName) {
+                const input = (this.oauthManualInput || '').trim();
+                if (!input) return;
+
+                const state = this.oauthManualState;
+                this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: '' });
+
+                try {
+                    const body = JSON.stringify({ callback_url: input, state });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({ method: 'POST', body })
+                        : { method: 'POST', headers: this.headers(), body };
+                    const res = await fetch('/admin/api/v1/oauth/callback-manual', request);
+                    if (!res.ok) {
+                        const msg = await this._oauthResponseMessage(res, 'Failed to complete authentication.');
+                        this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: msg });
+                        return;
+                    }
+                    this.oauthManualState = '';
+                    this.oauthManualProvider = '';
+                    this.oauthManualInput = '';
+                    await this.oauthLoadProviders();
+                } catch (err) {
+                    console.error('OAuth manual callback failed:', err);
+                    this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: err.message || 'Authentication failed.' });
+                } finally {
                     this.oauthActiveProvider = '';
                 }
+            },
+
+            async oauthAuthenticateManual(providerName) {
+                if (this.oauthActiveProvider) return;
+                this.oauthActiveProvider = providerName;
+                this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: '' });
+                this.oauthManualState = '';
+                this.oauthManualProvider = '';
+                this.oauthManualInput = '';
+
+                try {
+                    const body = JSON.stringify({ provider_name: providerName });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({ method: 'POST', body })
+                        : { method: 'POST', headers: this.headers(), body };
+                    const res = await fetch('/admin/api/v1/oauth/start', request);
+                    if (!res.ok) {
+                        const msg = await this._oauthResponseMessage(res, 'Failed to start OAuth flow.');
+                        this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: msg });
+                        return;
+                    }
+                    const data = await res.json();
+
+                    const width = 600, height = 700;
+                    const left = window.screenX + (window.outerWidth - width) / 2;
+                    const top = window.screenY + (window.outerHeight - height) / 2;
+                    const popup = window.open(
+                        data.manual_auth_url,
+                        'oauth_manual_' + providerName,
+                        'width=' + width + ',height=' + height + ',left=' + left + ',top=' + top + ',toolbar=no,menubar=no'
+                    );
+
+                    if (!popup) {
+                        this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: 'Popup blocked — please allow popups for this site.' });
+                        return;
+                    }
+
+                    // Show manual input field — user will paste the callback URL.
+                    this.oauthManualState = data.state;
+                    this.oauthManualProvider = providerName;
+                    // Keep oauthActiveProvider set so Authenticate button stays disabled.
+                } catch (err) {
+                    console.error('OAuth manual authentication failed:', err);
+                    this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: err.message || 'Authentication failed.' });
+                    this.oauthActiveProvider = '';
+                }
+            },
+
+            oauthCancelManual(providerName) {
+                this.oauthManualState = '';
+                this.oauthManualProvider = '';
+                this.oauthManualInput = '';
+                this.oauthActiveProvider = '';
+                this.oauthErrors = Object.assign({}, this.oauthErrors, { [providerName]: '' });
             },
 
             _oauthWaitForCallback(popup) {

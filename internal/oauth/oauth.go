@@ -40,10 +40,12 @@ type Profile struct {
 type Provider interface {
 	// AuthorizationURL returns the URL the user must visit to authorize.
 	// state is a random CSRF token; verifier is the PKCE code verifier.
-	AuthorizationURL(state, verifier string, callbackPort int) string
+	// redirectURI is the full callback URI (e.g. "http://localhost:54545/callback"
+	// or "https://example.com/admin/api/v1/oauth/callback").
+	AuthorizationURL(state, verifier, redirectURI string) string
 
 	// ExchangeCode exchanges an authorization code for tokens.
-	ExchangeCode(ctx context.Context, code, verifier, state string, callbackPort int) (*TokenResponse, error)
+	ExchangeCode(ctx context.Context, code, verifier, state, redirectURI string) (*TokenResponse, error)
 
 	// RefreshToken obtains a new access token using a refresh token.
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenResponse, error)
