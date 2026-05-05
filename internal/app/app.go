@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/fallback"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
+	"gomodel/internal/oauthstore"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/server"
@@ -96,6 +97,29 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	app := &App{
 		config: appCfg,
+	}
+
+	// Initialize a temporary storage connection to back the OAuth token store.
+	// We reuse the same backend as the rest of the app so tokens land in the
+	// same database. The connection is shared (not owned) — it will be closed
+	// by whichever subsystem owns it (audit, usage, etc.).
+	// We open a dedicated connection here only to bootstrap the factory before
+	// providers.Init; the store itself is lightweight (no background goroutines).
+	var oauthStore oauthstore.Store
+	{
+		tmpStorage, storageErr := storage.New(ctx, cfg.AppConfig.Config.Storage.BackendConfig())
+		if storageErr != nil {
+			slog.Warn("oauth store unavailable: failed to open storage", "error", storageErr)
+		} else {
+			s, storeErr := oauthstore.NewFromStorage(ctx, tmpStorage)
+			if storeErr != nil {
+				slog.Warn("oauth store unavailable: failed to create store", "error", storeErr)
+				_ = tmpStorage.Close()
+			} else {
+				oauthStore = s
+				cfg.Factory.SetOAuthStore(oauthStore)
+			}
+		}
 	}
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
@@ -399,7 +423,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(
+		adminHandler, oauthHandler, dashHandler, adminErr := initAdmin(
 			auditResult.Storage,
 			usageResult.Storage,
 			providerResult.Registry,
@@ -410,6 +434,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			workflowResult.Service,
 			app.guardrails.Service,
 			budgetResult.Service,
+			oauthStore,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			usagePricingRecalculationConfigured(appCfg),
@@ -421,6 +446,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
+			serverCfg.OAuthHandler = oauthHandler
 			slog.Info("admin API enabled", "api", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"))
 			if adminCfg.UIEnabled {
 				serverCfg.AdminUIEnabled = true
@@ -800,12 +826,13 @@ func initAdmin(
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	budgetService *budget.Service,
+	oauthTokenStore oauthstore.Store,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	usagePricingRecalculationEnabled bool,
 	basePath string,
 	uiEnabled bool,
-) (*admin.Handler, *dashboard.Handler, error) {
+) (*admin.Handler, *admin.OAuthHandler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
 	var store storage.Storage
 	if auditStorage != nil {
@@ -821,7 +848,7 @@ func initAdmin(
 		var err error
 		reader, err = usage.NewReader(store)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create usage reader: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create usage reader: %w", err)
 		}
 		if usagePricingRecalculationEnabled {
 			pricingRecalculator, err = usage.NewPricingRecalculator(store)
@@ -840,7 +867,7 @@ func initAdmin(
 		var err error
 		auditReader, err = auditlog.NewReader(auditStorage)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
 		}
 	}
 
@@ -860,16 +887,22 @@ func initAdmin(
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 	)
 
+	// Create OAuth handler if an OAuth token store is available.
+	var oauthHandler *admin.OAuthHandler
+	if oauthTokenStore != nil {
+		oauthHandler = admin.NewOAuthHandler(oauthTokenStore, configuredProviders)
+	}
+
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
 		var err error
 		dashHandler, err = dashboard.NewWithBasePath(basePath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
 		}
 	}
 
-	return adminHandler, dashHandler, nil
+	return adminHandler, oauthHandler, dashHandler, nil
 }
 
 func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Definition, error) {

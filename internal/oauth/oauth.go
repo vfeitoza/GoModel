@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 )
 
@@ -66,13 +67,14 @@ func deriveChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-// generateState creates a random CSRF state token.
+// generateState creates a random CSRF state token as a hex string,
+// matching the format expected by the Anthropic OAuth endpoint.
 func generateState() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+	return hex.EncodeToString(b), nil
 }
 
 // PKCEPair holds a verifier and its derived challenge.

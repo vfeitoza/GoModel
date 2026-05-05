@@ -209,6 +209,7 @@ function dashboard() {
         "audit-logs",
         "guardrails",
         "auth-keys",
+        "oauth",
         "settings",
       ].includes(page)
         ? page
@@ -238,6 +239,9 @@ function dashboard() {
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
+      }
+      if (page === "oauth" && typeof this.oauthInit === "function") {
+        this.oauthInit();
       }
       if (page === "settings") {
         if (typeof this.ensureTimezoneOptions === "function") {
@@ -1072,6 +1076,12 @@ function dashboard() {
         ? dashboardAuthKeysModule
         : null,
       "dashboardAuthKeysModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardOAuthModule === "function"
+        ? dashboardOAuthModule
+        : null,
+      "dashboardOAuthModule",
     ),
     resolveModuleFactory(
       typeof dashboardGuardrailsModule === "function"

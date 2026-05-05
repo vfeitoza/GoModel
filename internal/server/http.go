@@ -72,6 +72,7 @@ type Config struct {
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
 	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
+	OAuthHandler                    *admin.OAuthHandler                    // OAuth admin handler (nil if no OAuth providers configured)
 	DashboardHandler                *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled                  bool                                   // Whether to expose the Swagger UI at /swagger/index.html
 	ResponseCacheMiddleware         *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
@@ -315,7 +316,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag)
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin/api/v1"))
+		adminGroup := e.Group("/admin/api/v1")
+		cfg.AdminHandler.RegisterRoutes(adminGroup)
+		admin.RegisterOAuthRoutes(adminGroup, cfg.OAuthHandler)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)

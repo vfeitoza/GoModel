@@ -55,21 +55,24 @@ func NewAnthropicProviderWithClient(client *http.Client) *AnthropicProvider {
 }
 
 // AuthorizationURL builds the Anthropic OAuth authorization URL.
+// Parameter order matches the reference implementation (cligate/claude-oauth.js).
 func (p *AnthropicProvider) AuthorizationURL(state, verifier string, callbackPort int) string {
 	challenge := deriveChallenge(verifier)
 	redirectURI := callbackURI(callbackPort)
 
-	params := url.Values{}
-	params.Set("code", "true") // required by Claude OAuth
-	params.Set("client_id", AnthropicClientID)
-	params.Set("redirect_uri", redirectURI)
-	params.Set("response_type", "code")
-	params.Set("scope", anthropicDefaultScopes)
-	params.Set("state", state)
-	params.Set("code_challenge", challenge)
-	params.Set("code_challenge_method", "S256")
+	// Build params in the exact order used by the reference Claude OAuth client.
+	// url.Values.Encode() sorts alphabetically which may differ from what the
+	// Anthropic endpoint expects, so we construct the query string manually.
+	query := "code=true" +
+		"&client_id=" + url.QueryEscape(AnthropicClientID) +
+		"&redirect_uri=" + url.QueryEscape(redirectURI) +
+		"&response_type=code" +
+		"&scope=" + url.QueryEscape(anthropicDefaultScopes) +
+		"&state=" + url.QueryEscape(state) +
+		"&code_challenge=" + url.QueryEscape(challenge) +
+		"&code_challenge_method=S256"
 
-	return anthropicAuthURL + "?" + params.Encode()
+	return anthropicAuthURL + "?" + query
 }
 
 // ExchangeCode exchanges an authorization code for tokens.
