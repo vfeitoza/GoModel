@@ -319,6 +319,12 @@ func clampUtilization(v float64) float64 {
 	if v < 0 {
 		return 0
 	}
+	// The Anthropic API may return utilization as a fraction (0–1) or as a
+	// percentage (0–100). Values above 1 are treated as already-percentage.
+	// Normalize to 0–1 range to match UsageWindow.Utilization semantics.
+	if v > 1 {
+		v = v / 100
+	}
 	if v > 1 {
 		return 1
 	}

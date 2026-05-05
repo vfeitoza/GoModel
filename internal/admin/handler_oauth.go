@@ -333,6 +333,7 @@ func (h *OAuthHandler) RevokeOAuth(c *echo.Context) error {
 }
 
 // GetOAuthUsage returns usage data for an OAuth provider.
+// Always invalidates the cache so the user gets fresh data on demand.
 func (h *OAuthHandler) GetOAuthUsage(c *echo.Context) error {
 	providerName := strings.TrimSpace(c.Param("provider_name"))
 	if providerName == "" {
@@ -348,6 +349,11 @@ func (h *OAuthHandler) GetOAuthUsage(c *echo.Context) error {
 			})
 		}
 		return handleError(c, err)
+	}
+
+	// Invalidate cache so every explicit refresh fetches fresh data.
+	if h.usageFetcher != nil {
+		h.usageFetcher.Invalidate(providerName)
 	}
 
 	usage, err := h.usageFetcher.FetchUsage(ctx, providerName, token.AccessToken)
