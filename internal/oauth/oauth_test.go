@@ -71,7 +71,7 @@ func TestAnthropicProvider_ExchangeCode(t *testing.T) {
 		assert.Equal(t, "test-state", body["state"])
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":      "access-abc",
 			"refresh_token":     "refresh-xyz",
 			"expires_in":        3600,
@@ -95,7 +95,7 @@ func TestAnthropicProvider_ExchangeCode(t *testing.T) {
 func TestAnthropicProvider_ExchangeCode_Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid_grant"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer srv.Close()
 
@@ -113,7 +113,7 @@ func TestAnthropicProvider_RefreshToken(t *testing.T) {
 		assert.Equal(t, "old-refresh", body["refresh_token"])
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "new-access",
 			"refresh_token": "new-refresh",
 			"expires_in":    3600,
@@ -133,7 +133,7 @@ func TestAnthropicProvider_RefreshToken_PreservesOriginalWhenNotRotated(t *testi
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Provider does not return a new refresh token
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "new-access",
 			"expires_in":   3600,
 		})

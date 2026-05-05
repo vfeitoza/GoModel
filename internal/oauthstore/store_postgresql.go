@@ -182,32 +182,5 @@ type pgScanner interface {
 }
 
 func scanPostgreSQLToken(scanner pgScanner) (*Token, error) {
-	var t Token
-	var expiresAt int64
-	var createdAt int64
-	var updatedAt int64
-	var scopes string
-
-	if err := scanner.Scan(
-		&t.ProviderName,
-		&t.ProviderType,
-		&t.AccessToken,
-		&t.RefreshToken,
-		&expiresAt,
-		&scopes,
-		&t.AccountEmail,
-		&t.AccountID,
-		&t.DisplayName,
-		&t.SubscriptionType,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return nil, err
-	}
-
-	t.ExpiresAt = time.Unix(expiresAt, 0).UTC()
-	t.CreatedAt = time.Unix(createdAt, 0).UTC()
-	t.UpdatedAt = time.Unix(updatedAt, 0).UTC()
-	t.Scopes = splitScopes(scopes)
-	return &t, nil
+	return scanTokenRow(scanner)
 }

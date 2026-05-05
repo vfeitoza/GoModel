@@ -261,11 +261,6 @@ func LocalCallbackURI(port int) string {
 	return fmt.Sprintf("http://localhost:%d/callback", port)
 }
 
-// callbackURI builds the local redirect URI for the given port.
-func callbackURI(port int) string {
-	return LocalCallbackURI(port)
-}
-
 // splitScopes splits a space-separated scope string into a slice.
 func splitScopes(s string) []string {
 	s = strings.TrimSpace(s)

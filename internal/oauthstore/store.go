@@ -54,6 +54,44 @@ type Store interface {
 	Close() error
 }
 
+// rowScanner is implemented by *sql.Row, *sql.Rows, and pgx equivalents.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanTokenRow scans a token from any row scanner (SQLite or PostgreSQL).
+// Column order must match the SELECT used in each store implementation.
+func scanTokenRow(scanner rowScanner) (*Token, error) {
+	var t Token
+	var expiresAt int64
+	var createdAt int64
+	var updatedAt int64
+	var scopes string
+
+	if err := scanner.Scan(
+		&t.ProviderName,
+		&t.ProviderType,
+		&t.AccessToken,
+		&t.RefreshToken,
+		&expiresAt,
+		&scopes,
+		&t.AccountEmail,
+		&t.AccountID,
+		&t.DisplayName,
+		&t.SubscriptionType,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	t.ExpiresAt = time.Unix(expiresAt, 0).UTC()
+	t.CreatedAt = time.Unix(createdAt, 0).UTC()
+	t.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	t.Scopes = splitScopes(scopes)
+	return &t, nil
+}
+
 // normalizeProviderName trims and lowercases the provider name for consistent
 // storage and lookup.
 func normalizeProviderName(name string) string {

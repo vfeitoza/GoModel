@@ -178,40 +178,5 @@ type sqliteScanner interface {
 }
 
 func scanSQLiteToken(scanner sqliteScanner) (*Token, error) {
-	var t Token
-	var expiresAt int64
-	var createdAt int64
-	var updatedAt int64
-	var scopes string
-
-	if err := scanner.Scan(
-		&t.ProviderName,
-		&t.ProviderType,
-		&t.AccessToken,
-		&t.RefreshToken,
-		&expiresAt,
-		&scopes,
-		&t.AccountEmail,
-		&t.AccountID,
-		&t.DisplayName,
-		&t.SubscriptionType,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return nil, err
-	}
-
-	t.ExpiresAt = time.Unix(expiresAt, 0).UTC()
-	t.CreatedAt = time.Unix(createdAt, 0).UTC()
-	t.UpdatedAt = time.Unix(updatedAt, 0).UTC()
-	t.Scopes = splitScopes(scopes)
-	return &t, nil
-}
-
-func isSQLiteDuplicateColumnError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
+	return scanTokenRow(scanner)
 }
