@@ -36,6 +36,10 @@
             <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
             <span>API Keys</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/oauth"}}" class="nav-item" :class="{ active: page === 'oauth' }" title="OAuth Providers" @click.prevent="navigate('oauth')">
+            <i data-lucide="fingerprint" class="nav-icon" aria-hidden="true"></i>
+            <span>OAuth</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/workflows"}}" class="nav-item" :class="{ active: page === 'workflows' }" title="Workflows" @click.prevent="navigate('workflows')">
             <i data-lucide="workflow" class="nav-icon" aria-hidden="true"></i>
             <span>Workflows</span>

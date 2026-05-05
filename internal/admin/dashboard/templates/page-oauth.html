@@ -1,0 +1,214 @@
+{{define "page-oauth"}}
+<div class="page-header">
+    <div class="page-header-content">
+        <h2 class="page-title">OAuth Providers</h2>
+        <p class="page-subtitle">Manage providers authenticated via OAuth instead of a static API key.</p>
+    </div>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary btn-sm" @click="oauthRefresh()" :disabled="oauthLoading" aria-label="Refresh OAuth providers">
+            <i data-lucide="refresh-cw" class="btn-icon" :class="{ 'spin': oauthLoading }" aria-hidden="true"></i>
+            Refresh
+        </button>
+    </div>
+</div>
+
+<div class="section">
+    <!-- Loading state -->
+    <div class="loading-state" x-show="oauthLoading && oauthProviders.length === 0" aria-live="polite">
+        <i data-lucide="loader-2" class="loading-icon spin" aria-hidden="true"></i>
+        <span>Loading OAuth providers...</span>
+    </div>
+
+    <!-- Empty state: no OAuth providers configured -->
+    <div class="empty-state" x-show="!oauthLoading && oauthProviders.length === 0">
+        <i data-lucide="fingerprint" class="empty-icon" aria-hidden="true"></i>
+        <p class="empty-title">No OAuth providers configured</p>
+        <p class="empty-description">
+            Add a provider with <code>api_key: "oauth"</code> in your configuration to enable OAuth authentication.
+        </p>
+        <pre class="empty-code">providers:
+  my_claude:
+    type: anthropic
+    api_key: "oauth"</pre>
+    </div>
+
+    <!-- Provider cards -->
+    <div class="oauth-provider-grid" x-show="oauthProviders.length > 0">
+        <template x-for="provider in oauthProviders" :key="provider.provider_name">
+            <article class="oauth-card" :class="oauthCardClass(provider)">
+                <!-- Card header -->
+                <div class="oauth-card-header">
+                    <div class="oauth-card-title-row">
+                        <h3 class="oauth-card-name" x-text="provider.provider_name"></h3>
+                        <span class="oauth-status-pill"
+                              :class="oauthStatusPillClass(provider)"
+                              x-text="oauthStatusLabel(provider)">
+                        </span>
+                    </div>
+                    <p class="oauth-card-type">
+                        Type: <span x-text="provider.provider_type || 'anthropic'"></span>
+                    </p>
+                </div>
+
+                <!-- Account info (when authenticated) -->
+                <div class="oauth-card-account" x-show="provider.authenticated">
+                    <div class="oauth-meta-row" x-show="provider.account_email">
+                        <span class="oauth-meta-label">Account</span>
+                        <span class="oauth-meta-value" x-text="provider.account_email"></span>
+                    </div>
+                    <div class="oauth-meta-row" x-show="provider.display_name">
+                        <span class="oauth-meta-label">Name</span>
+                        <span class="oauth-meta-value" x-text="provider.display_name"></span>
+                    </div>
+                    <div class="oauth-meta-row" x-show="provider.subscription_type">
+                        <span class="oauth-meta-label">Subscription</span>
+                        <span class="oauth-meta-value oauth-subscription"
+                              :class="'sub-' + (provider.subscription_type || 'free')"
+                              x-text="oauthSubscriptionLabel(provider.subscription_type)">
+                        </span>
+                    </div>
+                    <div class="oauth-meta-row" x-show="provider.token_expires_at">
+                        <span class="oauth-meta-label">Token expires</span>
+                        <span class="oauth-meta-value"
+                              x-text="oauthExpiresLabel(provider.token_expires_at)"
+                              :title="provider.token_expires_at">
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Usage section (when authenticated) -->
+                <div class="oauth-usage-section" x-show="provider.authenticated">
+                    <div class="oauth-usage-header">
+                        <span class="oauth-usage-title">Usage</span>
+                        <button class="btn-link btn-sm"
+                                @click="oauthLoadUsage(provider.provider_name)"
+                                :disabled="oauthUsageLoading[provider.provider_name]">
+                            <i data-lucide="refresh-cw" class="btn-icon-xs"
+                               :class="{ 'spin': oauthUsageLoading[provider.provider_name] }"
+                               aria-hidden="true"></i>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <template x-if="oauthUsage[provider.provider_name]">
+                        <div class="oauth-usage-bars">
+                            <!-- 5-hour window -->
+                            <template x-if="oauthUsage[provider.provider_name].five_hour">
+                                <div class="oauth-usage-bar">
+                                    <div class="oauth-usage-bar-label">
+                                        <span>5-hour window</span>
+                                        <span x-text="oauthUsage[provider.provider_name].five_hour.utilization_percent + '%'"></span>
+                                    </div>
+                                    <div class="progress-track" role="progressbar"
+                                         :aria-valuenow="oauthUsage[provider.provider_name].five_hour.utilization_percent"
+                                         aria-valuemin="0" aria-valuemax="100">
+                                        <div class="progress-fill"
+                                             :class="oauthProgressClass(oauthUsage[provider.provider_name].five_hour.utilization_percent)"
+                                             :style="'width:' + oauthUsage[provider.provider_name].five_hour.utilization_percent + '%'">
+                                        </div>
+                                    </div>
+                                    <div class="oauth-usage-bar-reset"
+                                         x-show="oauthUsage[provider.provider_name].five_hour.resets_at"
+                                         x-text="'Resets ' + oauthResetLabel(oauthUsage[provider.provider_name].five_hour.resets_at)">
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- 7-day window -->
+                            <template x-if="oauthUsage[provider.provider_name].seven_day">
+                                <div class="oauth-usage-bar">
+                                    <div class="oauth-usage-bar-label">
+                                        <span>7-day window</span>
+                                        <span x-text="oauthUsage[provider.provider_name].seven_day.utilization_percent + '%'"></span>
+                                    </div>
+                                    <div class="progress-track" role="progressbar"
+                                         :aria-valuenow="oauthUsage[provider.provider_name].seven_day.utilization_percent"
+                                         aria-valuemin="0" aria-valuemax="100">
+                                        <div class="progress-fill"
+                                             :class="oauthProgressClass(oauthUsage[provider.provider_name].seven_day.utilization_percent)"
+                                             :style="'width:' + oauthUsage[provider.provider_name].seven_day.utilization_percent + '%'">
+                                        </div>
+                                    </div>
+                                    <div class="oauth-usage-bar-reset"
+                                         x-show="oauthUsage[provider.provider_name].seven_day.resets_at"
+                                         x-text="'Resets ' + oauthResetLabel(oauthUsage[provider.provider_name].seven_day.resets_at)">
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Extra usage -->
+                            <template x-if="oauthUsage[provider.provider_name].extra_usage">
+                                <div class="oauth-extra-usage">
+                                    <div class="oauth-usage-bar-label">
+                                        <span>Extra credits</span>
+                                        <span x-text="oauthExtraUsageLabel(oauthUsage[provider.provider_name].extra_usage)"></span>
+                                    </div>
+                                    <div class="oauth-extra-disabled"
+                                         x-show="!oauthUsage[provider.provider_name].extra_usage.is_enabled"
+                                         x-text="'Disabled: ' + (oauthUsage[provider.provider_name].extra_usage.disabled_reason || 'unknown reason')">
+                                    </div>
+                                </div>
+                            </template>
+
+                            <p class="oauth-usage-fetched"
+                               x-show="oauthUsage[provider.provider_name].fetched_at"
+                               x-text="'Updated ' + oauthResetLabel(oauthUsage[provider.provider_name].fetched_at)">
+                            </p>
+                        </div>
+                    </template>
+
+                    <p class="oauth-usage-empty"
+                       x-show="!oauthUsage[provider.provider_name] && !oauthUsageLoading[provider.provider_name]">
+                        <button class="btn-link" @click="oauthLoadUsage(provider.provider_name)">Load usage data</button>
+                    </p>
+                </div>
+
+                <!-- Actions -->
+                <div class="oauth-card-actions">
+                    <template x-if="!provider.authenticated || provider.status === 'expired'">
+                        <button class="btn btn-primary btn-sm"
+                                @click="oauthAuthenticate(provider.provider_name)"
+                                :disabled="oauthAuthenticating[provider.provider_name]">
+                            <i data-lucide="log-in" class="btn-icon" aria-hidden="true"></i>
+                            <span x-text="provider.status === 'expired' ? 'Re-authenticate' : 'Authenticate'"></span>
+                        </button>
+                    </template>
+                    <template x-if="provider.authenticated">
+                        <button class="btn btn-danger-outline btn-sm"
+                                @click="oauthRevoke(provider.provider_name)"
+                                :disabled="oauthRevoking[provider.provider_name]">
+                            <i data-lucide="log-out" class="btn-icon" aria-hidden="true"></i>
+                            Revoke
+                        </button>
+                    </template>
+                </div>
+
+                <!-- Error message -->
+                <div class="oauth-card-error" x-show="oauthErrors[provider.provider_name]" role="alert">
+                    <i data-lucide="alert-circle" class="error-icon" aria-hidden="true"></i>
+                    <span x-text="oauthErrors[provider.provider_name]"></span>
+                </div>
+            </article>
+        </template>
+    </div>
+</div>
+
+<!-- Endpoint hint -->
+<div class="section" x-show="oauthProviders.some(p => p.authenticated)">
+    <div class="info-box">
+        <i data-lucide="info" class="info-icon" aria-hidden="true"></i>
+        <div>
+            <p class="info-title">Using OAuth providers</p>
+            <p class="info-text">
+                Send requests via the passthrough route:
+                <code>/p/{provider_name}/v1/chat/completions</code>
+            </p>
+            <template x-for="p in oauthProviders.filter(p => p.authenticated)" :key="p.provider_name">
+                <p class="info-example">
+                    <code x-text="'POST /p/' + p.provider_name + '/v1/chat/completions'"></code>
+                </p>
+            </template>
+        </div>
+    </div>
+</div>
+{{end}}

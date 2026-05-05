@@ -198,6 +198,14 @@ providers:
     type: anthropic
     api_key: "sk-ant-..."
 
+  # OAuth-authenticated provider example.
+  # Set api_key to "oauth" to enable OAuth authentication via the dashboard.
+  # After configuring, visit /admin/dashboard/oauth to authenticate.
+  # Requests use the passthrough route: POST /p/anthropic_oauth/v1/chat/completions
+  # anthropic_oauth:
+  #   type: anthropic
+  #   api_key: "oauth"
+
   gemini:
     type: gemini
     api_key: "..."

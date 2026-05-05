@@ -15,6 +15,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
+	"gomodel/internal/oauth"
 	"gomodel/internal/providers"
 	"gomodel/internal/streaming"
 )
@@ -45,6 +46,7 @@ var allowedAnthropicImageMediaTypes = map[string]struct{}{
 type Provider struct {
 	client *llmclient.Client
 	apiKey string
+	oauth  *oauthState // non-nil when api_key == "oauth"
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -58,6 +60,15 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		apiKey:               providerCfg.APIKey,
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
+
+	if isOAuthAPIKey(providerCfg.APIKey) && opts.OAuthStore != nil {
+		p.oauth = &oauthState{
+			store:        opts.OAuthStore,
+			providerName: providerCfg.Name,
+			oauthProv:    oauth.NewAnthropicProvider(),
+		}
+	}
+
 	clientCfg := llmclient.Config{
 		ProviderName:   "anthropic",
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
@@ -156,7 +167,11 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 
 // setHeaders sets the required headers for Anthropic API requests
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("x-api-key", p.apiKey)
+	if p.oauth != nil {
+		p.setOAuthHeader(req)
+	} else {
+		req.Header.Set("x-api-key", p.apiKey)
+	}
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
 
 	// Forward request ID if present in context

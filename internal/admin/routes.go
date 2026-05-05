@@ -66,3 +66,12 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/workflows", h.CreateWorkflow)
 	g.POST("/workflows/:id/deactivate", h.DeactivateWorkflow)
 }
+
+// RegisterOAuthRoutes mounts the OAuth admin routes on the given route group.
+// oauthHandler may be nil — in that case no OAuth routes are registered.
+func RegisterOAuthRoutes(g RouteRegistrar, oauthHandler *OAuthHandler) {
+	if oauthHandler == nil {
+		return
+	}
+	oauthHandler.RegisterOAuthRoutes(g)
+}

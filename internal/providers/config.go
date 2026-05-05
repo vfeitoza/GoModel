@@ -14,6 +14,7 @@ import (
 // ProviderConfig holds the fully resolved provider configuration after merging
 // global defaults with per-provider overrides.
 type ProviderConfig struct {
+	Name       string // configured provider name (e.g. "anthropic_oauth")
 	Type       string
 	APIKey     string
 	BaseURL    string
@@ -409,6 +410,7 @@ func isUnresolvedEnvPlaceholder(value string) bool {
 }
 
 // filterEmptyProviders removes providers without valid credentials.
+// Providers with api_key: "oauth" are kept — their token is managed at runtime.
 func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
@@ -417,6 +419,11 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 			continue
 		}
 		if known && spec.AllowAPIKeyless {
+			result[name] = p
+			continue
+		}
+		// Allow OAuth sentinel value through — token is stored at runtime.
+		if strings.EqualFold(strings.TrimSpace(p.APIKey), "oauth") {
 			result[name] = p
 			continue
 		}
@@ -432,15 +439,16 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 func buildProviderConfigs(raw map[string]config.RawProviderConfig, global config.ResilienceConfig) map[string]ProviderConfig {
 	result := make(map[string]ProviderConfig, len(raw))
 	for name, r := range raw {
-		result[name] = buildProviderConfig(r, global)
+		result[name] = buildProviderConfig(name, r, global)
 	}
 	return result
 }
 
 // buildProviderConfig merges a single RawProviderConfig with the global ResilienceConfig.
 // Non-nil fields in the raw config override the global defaults.
-func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceConfig) ProviderConfig {
+func buildProviderConfig(name string, raw config.RawProviderConfig, global config.ResilienceConfig) ProviderConfig {
 	resolved := ProviderConfig{
+		Name:                   name,
 		Type:                   raw.Type,
 		APIKey:                 raw.APIKey,
 		BaseURL:                raw.BaseURL,

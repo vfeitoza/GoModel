@@ -9,6 +9,7 @@ import (
 	"gomodel/config"
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
+	"gomodel/internal/oauthstore"
 )
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
@@ -16,6 +17,9 @@ type ProviderOptions struct {
 	Hooks      llmclient.Hooks
 	Models     []string
 	Resilience config.ResilienceConfig
+	// OAuthStore is used by providers configured with api_key: "oauth".
+	// May be nil when OAuth storage is not configured.
+	OAuthStore oauthstore.Store
 }
 
 // ProviderConstructor is the constructor signature for providers.
@@ -45,6 +49,7 @@ type ProviderFactory struct {
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
 	hooks                llmclient.Hooks
+	oauthStore           oauthstore.Store
 }
 
 // NewProviderFactory creates a new provider factory instance.
@@ -61,6 +66,13 @@ func (f *ProviderFactory) SetHooks(hooks llmclient.Hooks) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hooks = hooks
+}
+
+// SetOAuthStore configures the OAuth token store used by providers with api_key: "oauth".
+func (f *ProviderFactory) SetOAuthStore(store oauthstore.Store) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.oauthStore = store
 }
 
 // Add adds a provider constructor to the factory.
@@ -89,6 +101,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	f.mu.RLock()
 	builder, ok := f.builders[cfg.Type]
 	hooks := f.hooks
+	oauthStore := f.oauthStore
 	f.mu.RUnlock()
 
 	if !ok {
@@ -99,6 +112,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 		Hooks:      hooks,
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
+		OAuthStore: oauthStore,
 	}
 
 	return builder(cfg, opts), nil

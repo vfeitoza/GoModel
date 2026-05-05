@@ -36,6 +36,8 @@ type SanitizedProviderConfig struct {
 	APIVersion string                    `json:"api_version,omitempty"`
 	Models     []string                  `json:"models,omitempty"`
 	Resilience SanitizedResilienceConfig `json:"resilience"`
+	// IsOAuth is true when the provider is configured with api_key: "oauth".
+	IsOAuth bool `json:"is_oauth,omitempty"`
 }
 
 // ProviderRuntimeSnapshot describes runtime diagnostics for a configured provider.
@@ -95,6 +97,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			BaseURL:    strings.TrimSpace(cfg.BaseURL),
 			APIVersion: strings.TrimSpace(cfg.APIVersion),
 			Models:     models,
+			IsOAuth:    strings.EqualFold(strings.TrimSpace(cfg.APIKey), "oauth"),
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{
 					MaxRetries:     cfg.Resilience.Retry.MaxRetries,

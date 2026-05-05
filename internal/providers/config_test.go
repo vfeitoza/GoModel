@@ -63,7 +63,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 
 func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk-test"}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.Type != "openai" {
 		t.Errorf("Type = %q, want openai", got.Type)
@@ -75,7 +75,7 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 
 func TestBuildProviderConfig_NilResilience(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk", Resilience: nil}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.Resilience.Retry != globalRetry {
 		t.Error("nil Resilience should inherit global")
@@ -88,7 +88,7 @@ func TestBuildProviderConfig_NilRetry(t *testing.T) {
 		APIKey:     "sk",
 		Resilience: &config.RawResilienceConfig{Retry: nil},
 	}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.Resilience.Retry != globalRetry {
 		t.Error("nil Retry should inherit global")
@@ -105,7 +105,7 @@ func TestBuildProviderConfig_PartialOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.Resilience.Retry.MaxRetries != 10 {
 		t.Errorf("MaxRetries = %d, want 10", got.Resilience.Retry.MaxRetries)
@@ -132,7 +132,7 @@ func TestBuildProviderConfig_FullOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	r := got.Resilience.Retry
 	if r.MaxRetries != 7 {
@@ -162,7 +162,7 @@ func TestBuildProviderConfig_ZeroValueOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.Resilience.Retry.MaxRetries != 0 {
 		t.Errorf("explicit 0 should override global (3), got %d", got.Resilience.Retry.MaxRetries)
@@ -176,7 +176,7 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 		BaseURL: "https://custom.endpoint.com",
 		Models:  []config.RawProviderModel{{ID: "gpt-4"}, {ID: "gpt-3.5-turbo"}},
 	}
-	got := buildProviderConfig(raw, globalResilience)
+	got := buildProviderConfig("test", raw, globalResilience)
 
 	if got.APIKey != "sk-key" {
 		t.Errorf("APIKey = %q, want sk-key", got.APIKey)
@@ -1018,7 +1018,7 @@ func TestBuildProviderConfig_CircuitBreaker_InheritsGlobal(t *testing.T) {
 		Timeout:          30 * time.Second,
 	}
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk"}
-	got := buildProviderConfig(raw, global)
+	got := buildProviderConfig("test", raw, global)
 
 	if got.Resilience.CircuitBreaker != global.CircuitBreaker {
 		t.Errorf("expected global circuit breaker to be inherited\ngot:  %+v\nwant: %+v",
@@ -1034,7 +1034,7 @@ func TestBuildProviderConfig_CircuitBreaker_NilOverride(t *testing.T) {
 		APIKey:     "sk",
 		Resilience: &config.RawResilienceConfig{CircuitBreaker: nil},
 	}
-	got := buildProviderConfig(raw, global)
+	got := buildProviderConfig("test", raw, global)
 
 	if got.Resilience.CircuitBreaker != global.CircuitBreaker {
 		t.Error("nil CircuitBreaker override should inherit global")
@@ -1055,7 +1055,7 @@ func TestBuildProviderConfig_CircuitBreaker_PartialOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, global)
+	got := buildProviderConfig("test", raw, global)
 
 	if got.Resilience.CircuitBreaker.FailureThreshold != 10 {
 		t.Errorf("FailureThreshold = %d, want 10", got.Resilience.CircuitBreaker.FailureThreshold)
@@ -1087,7 +1087,7 @@ func TestBuildProviderConfig_CircuitBreaker_FullOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, global)
+	got := buildProviderConfig("test", raw, global)
 
 	cb := got.Resilience.CircuitBreaker
 	if cb.FailureThreshold != 3 {
@@ -1115,7 +1115,7 @@ func TestBuildProviderConfig_CircuitBreaker_ZeroValueOverride(t *testing.T) {
 			},
 		},
 	}
-	got := buildProviderConfig(raw, global)
+	got := buildProviderConfig("test", raw, global)
 
 	if got.Resilience.CircuitBreaker.FailureThreshold != 0 {
 		t.Errorf("explicit 0 should override global, got %d", got.Resilience.CircuitBreaker.FailureThreshold)
