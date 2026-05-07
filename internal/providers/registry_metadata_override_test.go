@@ -10,6 +10,8 @@ import (
 
 func ctxWindow(v int) *int { return &v }
 
+func price(v float64) *float64 { return &v }
+
 // TestInitialize_AppliesConfigMetadataOverrides verifies that operator-supplied
 // metadata from config.yaml takes precedence over (and merges onto) the remote
 // model registry during provider initialization. Exercises the config-driven
@@ -44,6 +46,11 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 			DisplayName:   "GLM 4.7 Flash (local)",
 			ContextWindow: ctxWindow(131072),
 			Capabilities:  map[string]bool{"tools": true},
+			Pricing: &core.ModelPricing{
+				Currency:      "USD",
+				InputPerMtok:  price(0),
+				OutputPerMtok: price(0),
+			},
 		},
 	})
 
@@ -63,6 +70,12 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	}
 	if !overridden.Model.Metadata.Capabilities["tools"] {
 		t.Errorf("Capabilities[tools] = false, want true")
+	}
+	if got := overridden.Model.Metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
+	}
+	if got := overridden.Model.Metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
 	}
 
 	untouched := registry.GetModel("nippur/Gemma4-31B")
@@ -172,6 +185,59 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 	pricing := registry.ResolvePricing("shared-model", "openai-backup")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != backupRate {
 		t.Fatalf("ResolvePricing(shared-model, openai-backup) = %+v, want backup pricing", pricing)
+	}
+}
+
+func TestApplyConfigMetadataOverrides_MergesPricingSourcesPerField(t *testing.T) {
+	baseInput := 1.0
+	baseOutput := 2.0
+	configInput := 3.0
+	existing := &ModelInfo{
+		Model: core.Model{
+			ID: "priced-model",
+			Metadata: &core.ModelMetadata{
+				Pricing: &core.ModelPricing{
+					Currency:      "USD",
+					InputPerMtok:  &baseInput,
+					OutputPerMtok: &baseOutput,
+				},
+				PricingSources: map[string]string{
+					"input_per_mtok":  core.ModelPricingSourceModelRegistry,
+					"output_per_mtok": core.ModelPricingSourceModelRegistry,
+				},
+			},
+		},
+		ProviderName: "openai-main",
+		ProviderType: "openai",
+	}
+	modelsByProvider := map[string]map[string]*ModelInfo{
+		"openai-main": {"priced-model": existing},
+	}
+	overrides := map[string]map[string]*core.ModelMetadata{
+		"openai-main": {
+			"priced-model": {
+				Pricing: &core.ModelPricing{InputPerMtok: &configInput},
+			},
+		},
+	}
+
+	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, nil)
+	if applied != 1 {
+		t.Fatalf("applied = %d, want 1", applied)
+	}
+
+	metadata := existing.Model.Metadata
+	if metadata.Pricing == nil || metadata.Pricing.InputPerMtok == nil || *metadata.Pricing.InputPerMtok != configInput {
+		t.Fatalf("InputPerMtok = %#v, want config override %v", metadata.Pricing, configInput)
+	}
+	if metadata.Pricing.OutputPerMtok == nil || *metadata.Pricing.OutputPerMtok != baseOutput {
+		t.Fatalf("OutputPerMtok = %#v, want registry value %v", metadata.Pricing.OutputPerMtok, baseOutput)
+	}
+	if got := metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
+	}
+	if got := metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
 	}
 }
 

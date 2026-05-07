@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gomodel/internal/core"
+	"gomodel/internal/modelselectors"
 )
 
 type compiledOverride struct {
@@ -132,12 +133,12 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 
 		compiled := compiledOverride{override: normalized}
 		switch normalized.ScopeKind() {
-		case ScopeGlobal:
+		case modelselectors.ScopeGlobal:
 			next.global = compiled
 			next.hasGlobal = true
-		case ScopeProviderModel:
-			next.exact[exactMatchKey(normalized.ProviderName, normalized.Model)] = compiled
-		case ScopeProvider:
+		case modelselectors.ScopeProviderModel:
+			next.exact[modelselectors.ExactMatchKey(normalized.ProviderName, normalized.Model)] = compiled
+		case modelselectors.ScopeProvider:
 			next.providerWide[normalized.ProviderName] = compiled
 		default:
 			next.modelWide[normalized.Model] = compiled
@@ -420,7 +421,7 @@ func (snap snapshot) effectiveState(selector core.ModelSelector) EffectiveState 
 }
 
 func (snap snapshot) matchingOverride(providerName, model string) (compiledOverride, bool) {
-	if key := exactMatchKey(providerName, model); key != "" {
+	if key := modelselectors.ExactMatchKey(providerName, model); key != "" {
 		if exact, ok := snap.exact[key]; ok {
 			return exact, true
 		}
