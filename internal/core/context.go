@@ -19,6 +19,9 @@ const (
 	// effectiveUserPathKey stores a request-scoped user path override applied
 	// after ingress capture, for example from a managed auth key.
 	effectiveUserPathKey contextKey = "effective-user-path"
+	// userPathHeaderNameKey stores the configured request header that carries
+	// the user path at the HTTP boundary.
+	userPathHeaderNameKey contextKey = "user-path-header-name"
 	// batchPreparationMetadataKey stores request-scoped batch preprocessing metadata.
 	batchPreparationMetadataKey contextKey = "batch-preparation-metadata"
 
@@ -140,6 +143,17 @@ func GetEffectiveUserPath(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// WithUserPathHeaderName returns a new context with a non-default configured
+// user-path request header name attached. The default header is intentionally a
+// no-op and does not clear an existing value.
+func WithUserPathHeaderName(ctx context.Context, headerName string) context.Context {
+	headerName = UserPathHeaderName(headerName)
+	if headerName == UserPathHeader {
+		return ctx
+	}
+	return context.WithValue(ctx, userPathHeaderNameKey, headerName)
 }
 
 // WithBatchPreparationMetadata returns a new context with batch preprocessing metadata attached.
