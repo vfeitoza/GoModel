@@ -652,21 +652,24 @@ curl -fsS -X DELETE "$BASE_URL/v1/files/$FILE_ID?provider=openai" | jq -e '.'
 
 ## 7. Native batches
 
-### S41 File batch create without `metadata.provider` (negative)
+### S41 File batch create infers provider from uploaded file
 
-Reproduces the current compatibility gap for file-based native batches.
+Checks file-based native batches infer the provider from the stored uploaded file
+when `metadata.provider` is omitted.
 
 ```bash
 FILE_ID=$(curl -fsS "$BASE_URL/v1/files?provider=openai&purpose=batch&limit=1" | jq -er '.data[0].id')
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s41.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s41.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/batches" \
+curl -fsS "$BASE_URL/v1/batches" \
   -H 'Content-Type: application/json' \
-  -d "{\"input_file_id\":\"$FILE_ID\",\"endpoint\":\"/v1/chat/completions\",\"completion_window\":\"24h\",\"metadata\":{\"suite\":\"qa-release\"}}"
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+  -d "{\"input_file_id\":\"$FILE_ID\",\"endpoint\":\"/v1/chat/completions\",\"completion_window\":\"24h\",\"metadata\":{\"suite\":\"qa-release\"}}" \
+  | jq -e --arg file_id "$FILE_ID" '
+      .object == "batch"
+      and .provider == "openai"
+      and .input_file_id == $file_id
+      and .endpoint == "/v1/chat/completions"
+      and .metadata.provider == "openai"
+      and .metadata.suite == "qa-release"
+    ' >/dev/null
 ```
 
 ### S42 File batch create with `metadata.provider`
