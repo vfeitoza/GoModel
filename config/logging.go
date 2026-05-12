@@ -1,0 +1,36 @@
+package config
+
+// LogConfig holds audit logging configuration
+type LogConfig struct {
+	// Enabled controls whether audit logging is active
+	// Default: false
+	Enabled bool `yaml:"enabled" env:"LOGGING_ENABLED"`
+
+	// LogBodies enables logging of full request/response bodies
+	// WARNING: May contain sensitive data (PII, API keys in prompts)
+	// Default: true
+	LogBodies bool `yaml:"log_bodies" env:"LOGGING_LOG_BODIES"`
+
+	// LogHeaders enables logging of request/response headers
+	// Sensitive headers (Authorization, Cookie, etc.) are auto-redacted
+	// Default: true
+	LogHeaders bool `yaml:"log_headers" env:"LOGGING_LOG_HEADERS"`
+
+	// BufferSize is the number of log entries to buffer before flushing
+	// Default: 1000
+	BufferSize int `yaml:"buffer_size" env:"LOGGING_BUFFER_SIZE"`
+
+	// FlushInterval is how often to flush buffered logs (in seconds)
+	// Default: 5
+	FlushInterval int `yaml:"flush_interval" env:"LOGGING_FLUSH_INTERVAL"`
+
+	// RetentionDays is how long to keep logs (0 = forever)
+	// Default: 30
+	RetentionDays int `yaml:"retention_days" env:"LOGGING_RETENTION_DAYS"`
+
+	// OnlyModelInteractions limits audit logging to AI model endpoints only
+	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
+	// Endpoints like /health, /metrics, /admin, /v1/models are skipped
+	// Default: true
+	OnlyModelInteractions bool `yaml:"only_model_interactions" env:"LOGGING_ONLY_MODEL_INTERACTIONS"`
+}
