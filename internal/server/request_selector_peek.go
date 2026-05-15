@@ -26,7 +26,10 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
-	if !hints.parsed || !hints.complete {
+	if !hints.parsed && !hints.complete {
+		if bodyMode == core.BodyModeOpaque && hints.model != "" {
+			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
+		}
 		return
 	}
 	core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)

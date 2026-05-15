@@ -311,12 +311,55 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		return nil
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider passthrough response body", err))
+	}
+
+	workflow := core.GetWorkflow(c.Request().Context())
+	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
+		model := ""
+		if info != nil {
+			model = strings.TrimSpace(info.Model)
+		}
+		model = resolvedModelFromWorkflow(workflow, model)
+		requestID := requestIDFromContextOrHeader(c.Request())
+		usagePath := strings.TrimSpace(c.Request().URL.Path)
+		s.logPassthroughNonStreamUsage(body, model, providerType, providerName, requestID, usagePath, c.Request().Context())
+	}
+
 	c.Response().WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+	if _, err := c.Response().Write(body); err != nil {
 		return err
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
 	}
 	return nil
+}
+
+func (s *passthroughService) logPassthroughNonStreamUsage(body []byte, model, providerType, providerName, requestID, endpoint string, ctx context.Context) {
+	if len(body) == 0 {
+		return
+	}
+
+	auditPath := passthroughStreamAuditPath(endpoint, providerType, endpoint)
+	var pricingArgs []*core.ModelPricing
+	if s.pricingResolver != nil {
+		pricingProvider := strings.TrimSpace(providerName)
+		if pricingProvider == "" {
+			pricingProvider = strings.TrimSpace(providerType)
+		}
+		if p := s.pricingResolver.ResolvePricing(model, pricingProvider); p != nil {
+			pricingArgs = append(pricingArgs, p)
+		}
+	}
+
+	entry := usage.ExtractFromCachedResponseBody(body, requestID, model, providerType, auditPath, "", pricingArgs...)
+	if entry == nil {
+		return
+	}
+	entry.ProviderName = strings.TrimSpace(providerName)
+	entry.UserPath = core.UserPathFromContext(ctx)
+	s.usageLogger.Write(entry)
 }
