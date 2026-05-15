@@ -344,7 +344,60 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 	return result
 }
 
-// ModelCount returns the number of registered models
+// ListModelsWithFormat returns models formatted according to the given ID format.
+func (r *ModelRegistry) ListModelsWithFormat(format config.ModelsEndpointIDFormat) []core.Model {
+	format = config.ResolveModelsEndpointIDFormat(format)
+	switch format {
+	case config.ModelsEndpointIDFormatUnqualified:
+		return r.listModelsUnqualified()
+	case config.ModelsEndpointIDFormatBoth:
+		return r.listModelsBoth()
+	default:
+		return r.ListPublicModels()
+	}
+}
+
+func (r *ModelRegistry) listModelsUnqualified() []core.Model {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	result := make([]core.Model, 0, len(r.models))
+	for providerName, models := range r.modelsByProvider {
+		for modelID, info := range models {
+			if _, exists := seen[modelID]; exists {
+				continue
+			}
+			seen[modelID] = struct{}{}
+			model := info.Model
+			model.ID = modelID
+			model.OwnedBy = providerName
+			result = append(result, model)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func (r *ModelRegistry) listModelsBoth() []core.Model {
+	qualified := r.ListPublicModels()
+	unqualified := r.listModelsUnqualified()
+
+	seen := make(map[string]struct{}, len(qualified)+len(unqualified))
+	result := make([]core.Model, 0, len(qualified)+len(unqualified))
+	for _, m := range qualified {
+		seen[m.ID] = struct{}{}
+		result = append(result, m)
+	}
+	for _, m := range unqualified {
+		if _, exists := seen[m.ID]; exists {
+			continue
+		}
+		result = append(result, m)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
 func (r *ModelRegistry) ModelCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

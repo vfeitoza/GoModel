@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"gomodel/config"
 	"gomodel/internal/core"
 )
 
@@ -21,7 +22,8 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 // It uses a dynamic model-to-provider mapping that is populated at startup
 // by fetching available models from each provider's /models endpoint.
 type Router struct {
-	lookup core.ModelLookup
+	lookup                  core.ModelLookup
+	modelsEndpointIDFormat  config.ModelsEndpointIDFormat
 }
 
 type providerTypeRegistry interface {
@@ -64,8 +66,14 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 		return nil, fmt.Errorf("lookup cannot be nil")
 	}
 	return &Router{
-		lookup: lookup,
+		lookup:                 lookup,
+		modelsEndpointIDFormat: config.ModelsEndpointIDFormatQualified,
 	}, nil
+}
+
+// SetModelsEndpointIDFormat configures the model ID format for GET /v1/models.
+func (r *Router) SetModelsEndpointIDFormat(format config.ModelsEndpointIDFormat) {
+	r.modelsEndpointIDFormat = config.ResolveModelsEndpointIDFormat(format)
 }
 
 // checkReady verifies the lookup has models available.
@@ -527,7 +535,11 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 		return nil, registryUnavailableError(err)
 	}
 	var models []core.Model
-	if public, ok := r.lookup.(publicModelLister); ok {
+	if formatted, ok := r.lookup.(interface {
+		ListModelsWithFormat(config.ModelsEndpointIDFormat) []core.Model
+	}); ok {
+		models = formatted.ListModelsWithFormat(r.modelsEndpointIDFormat)
+	} else if public, ok := r.lookup.(publicModelLister); ok {
 		models = public.ListPublicModels()
 	} else {
 		models = r.lookup.ListModels()

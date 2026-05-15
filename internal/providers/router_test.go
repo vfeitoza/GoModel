@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"gomodel/config"
 	"gomodel/internal/core"
 )
 
@@ -839,6 +840,70 @@ func TestRouterListModels(t *testing.T) {
 			t.Fatalf("resp.Data[%d].OwnedBy = %q, want %q", i, resp.Data[i].OwnedBy, model.OwnedBy)
 		}
 	}
+}
+
+func TestRouterListModelsWithFormat(t *testing.T) {
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: &mockProvider{}, providerName: "anthropic", providerType: "anthropic", modelID: "claude-sonnet-4-6"},
+		registryModelEntry{provider: &mockProvider{}, providerName: "openai", providerType: "openai", modelID: "gpt-4o"},
+	)
+
+	t.Run("qualified", func(t *testing.T) {
+		router, _ := NewRouter(registry)
+		router.SetModelsEndpointIDFormat(config.ModelsEndpointIDFormatQualified)
+
+		resp, err := router.ListModels(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for _, m := range resp.Data {
+			if !strings.Contains(m.ID, "/") {
+				t.Errorf("expected qualified ID with '/', got %q", m.ID)
+			}
+		}
+	})
+
+	t.Run("unqualified", func(t *testing.T) {
+		router, _ := NewRouter(registry)
+		router.SetModelsEndpointIDFormat(config.ModelsEndpointIDFormatUnqualified)
+
+		resp, err := router.ListModels(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(resp.Data) != 2 {
+			t.Fatalf("expected 2 models, got %d", len(resp.Data))
+		}
+		for _, m := range resp.Data {
+			if strings.Contains(m.ID, "/") {
+				t.Errorf("expected unqualified ID without '/', got %q", m.ID)
+			}
+		}
+	})
+
+	t.Run("both", func(t *testing.T) {
+		router, _ := NewRouter(registry)
+		router.SetModelsEndpointIDFormat(config.ModelsEndpointIDFormatBoth)
+
+		resp, err := router.ListModels(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(resp.Data) != 4 {
+			t.Fatalf("expected 4 models (2 qualified + 2 unqualified), got %d", len(resp.Data))
+		}
+		var qualified, unqualified int
+		for _, m := range resp.Data {
+			if strings.Contains(m.ID, "/") {
+				qualified++
+			} else {
+				unqualified++
+			}
+		}
+		if qualified != 2 || unqualified != 2 {
+			t.Errorf("expected 2 qualified + 2 unqualified, got %d + %d", qualified, unqualified)
+		}
+	})
 }
 
 func TestRouterGetProviderType(t *testing.T) {

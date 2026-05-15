@@ -23,6 +23,11 @@ type ModelsConfig struct {
 	// provider *_MODELS env vars affect the provider model inventory.
 	// Supported values: "fallback", "allowlist". Default: "fallback".
 	ConfiguredProviderModelsMode ConfiguredProviderModelsMode `yaml:"configured_provider_models_mode" env:"CONFIGURED_PROVIDER_MODELS_MODE"`
+
+	// ModelsEndpointIDFormat controls the model ID format returned by GET /v1/models.
+	// Supported values: "qualified" (provider/model), "unqualified" (model), "both".
+	// Default: "qualified".
+	ModelsEndpointIDFormat ModelsEndpointIDFormat `yaml:"models_endpoint_id_format" env:"MODELS_ENDPOINT_ID_FORMAT"`
 }
 
 // ConfiguredProviderModelsMode controls how explicitly configured provider
@@ -56,4 +61,37 @@ func ResolveConfiguredProviderModelsMode(mode ConfiguredProviderModelsMode) Conf
 		return ConfiguredProviderModelsModeFallback
 	}
 	return mode
+}
+
+// ModelsEndpointIDFormat controls the model ID format returned by GET /v1/models.
+type ModelsEndpointIDFormat string
+
+const (
+	ModelsEndpointIDFormatQualified   ModelsEndpointIDFormat = "qualified"
+	ModelsEndpointIDFormatUnqualified ModelsEndpointIDFormat = "unqualified"
+	ModelsEndpointIDFormatBoth        ModelsEndpointIDFormat = "both"
+)
+
+// Valid reports whether f is one of the supported models endpoint ID formats.
+func (f ModelsEndpointIDFormat) Valid() bool {
+	switch NormalizeModelsEndpointIDFormat(f) {
+	case ModelsEndpointIDFormatQualified, ModelsEndpointIDFormatUnqualified, ModelsEndpointIDFormatBoth:
+		return true
+	default:
+		return false
+	}
+}
+
+// NormalizeModelsEndpointIDFormat canonicalizes a models endpoint ID format value.
+func NormalizeModelsEndpointIDFormat(f ModelsEndpointIDFormat) ModelsEndpointIDFormat {
+	return ModelsEndpointIDFormat(strings.ToLower(strings.TrimSpace(string(f))))
+}
+
+// ResolveModelsEndpointIDFormat canonicalizes f and applies the process default.
+func ResolveModelsEndpointIDFormat(f ModelsEndpointIDFormat) ModelsEndpointIDFormat {
+	f = NormalizeModelsEndpointIDFormat(f)
+	if f == "" {
+		return ModelsEndpointIDFormatQualified
+	}
+	return f
 }

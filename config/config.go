@@ -62,6 +62,7 @@ func buildDefaultConfig() *Config {
 			OverridesEnabled:                true,
 			KeepOnlyAliasesAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:    ConfiguredProviderModelsModeFallback,
+			ModelsEndpointIDFormat:          ModelsEndpointIDFormatQualified,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

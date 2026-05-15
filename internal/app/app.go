@@ -107,6 +107,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize providers: %w", err)
 	}
 	app.providers = providerResult
+	app.providers.Router.SetModelsEndpointIDFormat(appCfg.Models.ModelsEndpointIDFormat)
 
 	// Initialize audit logging
 	auditResult, err := auditlog.New(ctx, appCfg)
