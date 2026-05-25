@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"gomodel/internal/core"
+	"gomodel/internal/routing"
 	"gomodel/internal/usage"
 )
 
@@ -15,6 +16,7 @@ type InferenceConfig struct {
 	ModelAuthorizer          ModelAuthorizer
 	WorkflowPolicyResolver   WorkflowPolicyResolver
 	FallbackResolver         FallbackResolver
+	FailoverPolicy           routing.FailoverPolicy
 	TranslatedRequestPatcher TranslatedRequestPatcher
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
@@ -29,6 +31,7 @@ type InferenceOrchestrator struct {
 	modelAuthorizer          ModelAuthorizer
 	workflowPolicyResolver   WorkflowPolicyResolver
 	fallbackResolver         FallbackResolver
+	failoverPolicy           routing.FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
@@ -43,6 +46,7 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		modelAuthorizer:          cfg.ModelAuthorizer,
 		workflowPolicyResolver:   cfg.WorkflowPolicyResolver,
 		fallbackResolver:         cfg.FallbackResolver,
+		failoverPolicy:           cfg.FailoverPolicy,
 		translatedRequestPatcher: cfg.TranslatedRequestPatcher,
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,

@@ -185,6 +185,72 @@ fallback:
     "claude-sonnet-4":
       mode: "off" # disable fallback just for this model
 
+routing:
+  # Canonical model pool routing.
+  #
+  # Use this section when you want clients to call a stable public model name
+  # (for example: "claude-sonnet-4-6") while the gateway maps that name to one
+  # or more exact provider/model candidates.
+  #
+  # Typical use cases:
+  # - multiple named accounts expose the same logical model with different IDs;
+  # - one provider/account should be primary and another should be a standby;
+  # - traffic should be distributed across equivalent candidates;
+  # - operators need manual enable/disable control per provider, canonical model,
+  #   or pool candidate through the admin API/dashboard.
+  defaults:
+    strategy: "priority_failover" # "priority_failover" = always prefer the lowest priority candidate; "weighted_round_robin" = distribute requests by weight
+    session_affinity: true # parsed sticky-routing setting for canonical pools; keep enabled if you want future/runtime affinity support to pin repeated requests to the same candidate
+    session_affinity_ttl: 30m # parsed TTL for session affinity bindings
+    failover:
+      enabled: true # when true, eligible errors can move the request to the next candidate in the same canonical pool
+      max_attempts: 3 # total attempts across pool candidates, including the first candidate
+      retry_on_statuses: [429, 500, 502, 503, 504] # provider statuses that qualify for retry/failover
+      retry_on_model_errors: true # also retry/fail over on model-unavailable / model-not-found / model-unsupported style errors
+
+  # model_pools map one public canonical model name to one or more exact provider
+  # candidates. The canonical key is what clients send in requests to the gateway.
+  #
+  # Example A: primary/backup routing.
+  # - Use strategy: "priority_failover"
+  # - Lower priority number wins during normal routing
+  # - Other candidates are used only when failover is triggered
+  #
+  # model_pools:
+  #   claude-sonnet-4-6:
+  #     candidates:
+  #       - provider: anthropic_primary
+  #         model: claude-sonnet-4-6
+  #         priority: 1
+  #       - provider: anthropic_backup
+  #         model: claude-sonnet-4-6-20250929
+  #         priority: 2
+  #
+  # Example B: weighted distribution across equivalent candidates.
+  # - Use strategy: "weighted_round_robin"
+  # - Higher weight receives more traffic
+  # - priority is still useful as a deterministic tie-breaker
+  #
+  # model_pools:
+  #   claude-opus-4-7:
+  #     candidates:
+  #       - provider: anthropic_primary
+  #         model: claude-opus-4-7
+  #         weight: 10
+  #         priority: 1
+  #       - provider: anthropic_backup
+  #         model: claude-opus-4-7
+  #         weight: 6
+  #         priority: 2
+  #
+  # Notes:
+  # - provider must match the named provider key under `providers:`.
+  # - model must be the exact provider-facing model ID.
+  # - canonical names are declared explicitly; the gateway does not infer that
+  #   dated and non-dated model IDs are equivalent.
+  # - if a canonical model has no pool entry, normal alias/provider resolution
+  #   continues to apply.
+
 providers:
   openai:
     type: openai

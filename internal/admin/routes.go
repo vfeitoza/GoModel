@@ -32,6 +32,10 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/audit/conversation", h.AuditConversation)
 
 	g.GET("/providers/status", h.ProviderStatus)
+	g.GET("/routing-state", h.ListRoutingState)
+	g.PUT("/routing-state", h.UpsertRoutingState)
+	g.DELETE("/routing-state", h.DeleteRoutingState)
+	g.GET("/routing/model-pools", h.ListRoutingModelPools)
 	g.POST("/runtime/refresh", h.RefreshRuntime)
 
 	g.GET("/budgets", h.ListBudgets)

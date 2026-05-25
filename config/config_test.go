@@ -133,6 +133,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Storage.Type != "sqlite" {
 		t.Errorf("expected Storage.Type=sqlite, got %s", cfg.Storage.Type)
 	}
+	if cfg.Routing.Defaults.Strategy != RoutingStrategyPriorityFailover {
+		t.Errorf("expected Routing.Defaults.Strategy=%q, got %q", RoutingStrategyPriorityFailover, cfg.Routing.Defaults.Strategy)
+	}
 	if cfg.Storage.SQLite.Path != "data/gomodel.db" {
 		t.Errorf("expected Storage.SQLite.Path=data/gomodel.db, got %s", cfg.Storage.SQLite.Path)
 	}
@@ -710,6 +713,81 @@ fallback:
 
 		if _, err := Load(); err == nil {
 			t.Fatal("expected Load() to fail for invalid fallback mode")
+		}
+	})
+}
+
+func TestLoad_RoutingConfigYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+routing:
+  defaults:
+    strategy: weighted_round_robin
+    session_affinity: false
+    session_affinity_ttl: 45m
+    failover:
+      enabled: true
+      max_attempts: 5
+      retry_on_statuses: [429, 503]
+      retry_on_model_errors: false
+  model_pools:
+    claude-sonnet-4-6:
+      candidates:
+        - provider: anthropic_b
+          model: claude-sonnet-4-6
+          weight: 10
+          priority: 1
+        - provider: anthropic_a
+          model: claude-sonnet-4-6-20250929
+          weight: 8
+          priority: 2
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		cfg := result.Config
+		if cfg.Routing.Defaults.Strategy != RoutingStrategyWeightedRoundRobin {
+			t.Fatalf("Routing.Defaults.Strategy = %q, want %q", cfg.Routing.Defaults.Strategy, RoutingStrategyWeightedRoundRobin)
+		}
+		if cfg.Routing.Defaults.SessionAffinity {
+			t.Fatal("expected SessionAffinity=false from YAML")
+		}
+		if cfg.Routing.Defaults.SessionAffinityTTL != 45*time.Minute {
+			t.Fatalf("SessionAffinityTTL = %s, want 45m", cfg.Routing.Defaults.SessionAffinityTTL)
+		}
+		pool := cfg.Routing.ModelPools["claude-sonnet-4-6"]
+		if len(pool.Candidates) != 2 {
+			t.Fatalf("len(pool.Candidates) = %d, want 2", len(pool.Candidates))
+		}
+	})
+}
+
+func TestLoad_InvalidRoutingStrategy(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+routing:
+  defaults:
+    strategy: invalid
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail for invalid routing strategy")
+		}
+		if !strings.Contains(err.Error(), "routing.defaults.strategy must be one of") {
+			t.Fatalf("Load() error = %v, want routing strategy validation error", err)
 		}
 	})
 }

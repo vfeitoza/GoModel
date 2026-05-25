@@ -31,6 +31,8 @@ import (
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/routing"
+	"gomodel/internal/routingstate"
 	"gomodel/internal/server"
 	"gomodel/internal/storage"
 	"gomodel/internal/usage"
@@ -50,6 +52,7 @@ type App struct {
 	aliases          *aliases.Result
 	modelOverrides   *modeloverrides.Result
 	pricingOverrides *pricingoverrides.Result
+	routingState     *routingstate.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
 	workflows        *workflows.Result
@@ -271,6 +274,22 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize model pricing overrides: %w", err)
 	}
 	app.pricingOverrides = pricingOverrideResult
+
+	var routingStateResult *routingstate.Result
+	sharedRoutingStateStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, fileStoreResult.Storage, aliasResult.Storage, modelOverrideResult.Storage, pricingOverrideResult.Storage)
+	if sharedRoutingStateStorage != nil {
+		routingStateResult, err = routingstate.NewWithSharedStorage(ctx, appCfg, sharedRoutingStateStorage)
+	} else {
+		routingStateResult, err = routingstate.New(ctx, appCfg)
+	}
+	if err != nil {
+		closeErr := errors.Join(app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.fileStore.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize routing state: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize routing state: %w", err)
+	}
+	app.routingState = routingStateResult
 	pricingResolver := usage.PricingResolver(providerResult.Registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		pricingResolver = app.pricingOverrides.Service
@@ -415,6 +434,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			"recommendation", "rebuild with -tags=swagger")
 	}
 
+	routingResolver := routing.NewResolver(appCfg.Routing, app.routingState.Service).WithRuntime(providerResult.Registry)
+	routingFailoverPolicy := routing.NewFailoverPolicy(appCfg.Routing.Defaults.Failover)
+	composedModelResolver := routing.NewComposedResolver(app.aliases.Service, routingResolver)
+	canonicalExposedModels := routing.NewCanonicalExposedModelLister(appCfg.Routing, providerResult.Registry, app.routingState.Service, providerResult.Registry)
+	exposedModels := routing.NewCombinedExposedModelLister(canonicalExposedModels, app.aliases.Service)
+
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
@@ -427,13 +452,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                     usageResult.Logger,
 		BudgetChecker:                   budgetResult.Service,
 		PricingResolver:                 pricingResolver,
-		ModelResolver:                   app.aliases.Service,
+		ModelResolver:                   composedModelResolver,
 		ModelAuthorizer:                 app.modelOverrides.Service,
 		FallbackResolver:                fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
-		ExposedModelLister:              app.aliases.Service,
+		ExposedModelLister:              exposedModels,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
 		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
@@ -444,6 +469,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
+		FailoverPolicy:                  routingFailoverPolicy,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -464,9 +490,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.aliases.Service,
 			app.modelOverrides.Service,
 			app.pricingOverrides.Service,
+			app.routingState.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
 			budgetResult.Service,
+			appCfg.Routing,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			app.live,
@@ -542,7 +570,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		if app.batch != nil {
 			batchCloseErr = app.batch.Close()
 		}
-		closeErr := errors.Join(workflowsCloseErr, guardrailsCloseErr, authKeysCloseErr, aliasCloseErr, modelOverridesCloseErr, pricingOverridesCloseErr, fileStoreCloseErr, batchCloseErr, app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(workflowsCloseErr, guardrailsCloseErr, authKeysCloseErr, aliasCloseErr, modelOverridesCloseErr, pricingOverridesCloseErr, app.routingState.Close(), fileStoreCloseErr, batchCloseErr, app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
 		}
@@ -551,17 +579,18 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	serverCfg.ResponseCacheMiddleware = rcm
 
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
-		ModelResolver:          app.aliases.Service,
+		ModelResolver:          composedModelResolver,
 		ModelAuthorizer:        app.modelOverrides.Service,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FallbackResolver:       serverCfg.FallbackResolver,
+		FailoverPolicy:         routingFailoverPolicy,
 		AuditLogger:            auditResult.Logger,
 		UsageLogger:            usageResult.Logger,
 		PricingResolver:        pricingResolver,
 		ResponseCache:          rcm,
 	})
 	closeWiredRuntime := func() error {
-		return errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.fileStore.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		return errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.routingState.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.fileStore.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 	}
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		closeErr := closeWiredRuntime()
@@ -913,9 +942,11 @@ func initAdmin(
 	aliasService *aliases.Service,
 	modelOverrideService *modeloverrides.Service,
 	pricingOverrideService *pricingoverrides.Service,
+	routingStateService *routingstate.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	budgetService *budget.Service,
+	routingConfig config.RoutingConfig,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
@@ -965,6 +996,7 @@ func initAdmin(
 		reader,
 		registry,
 		admin.WithConfiguredProviders(configuredProviders),
+		admin.WithRoutingConfig(routingConfig),
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
 		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithAuditReader(auditReader),
@@ -972,6 +1004,7 @@ func initAdmin(
 		admin.WithAliases(aliasService),
 		admin.WithModelOverrides(modelOverrideService),
 		admin.WithPricingOverrides(pricingOverrideService),
+		admin.WithRoutingState(routingStateService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),

@@ -73,6 +73,9 @@ func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op 
 	if r == nil || resolution == nil || r.registry == nil {
 		return nil
 	}
+	if len(resolution.CanonicalPoolFallbacks) > 0 {
+		return append([]core.ModelSelector(nil), resolution.CanonicalPoolFallbacks...)
+	}
 
 	requiredCategory := requiredCategoryForOperation(op)
 	if requiredCategory == core.CategoryEmbedding {

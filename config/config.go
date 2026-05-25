@@ -25,6 +25,7 @@ type Config struct {
 	Admin      AdminConfig      `yaml:"admin"`
 	Guardrails GuardrailsConfig `yaml:"guardrails"`
 	Fallback   FallbackConfig   `yaml:"fallback"`
+	Routing    RoutingConfig    `yaml:"routing"`
 	Workflows  WorkflowsConfig  `yaml:"workflows"`
 	Resilience ResilienceConfig `yaml:"resilience"`
 }
@@ -115,6 +116,19 @@ func buildDefaultConfig() *Config {
 		Fallback: FallbackConfig{
 			DefaultMode: FallbackModeManual,
 		},
+		Routing: RoutingConfig{
+			Defaults: RoutingDefaultsConfig{
+				Strategy:           RoutingStrategyPriorityFailover,
+				SessionAffinity:    true,
+				SessionAffinityTTL: 30 * time.Minute,
+				Failover: RoutingFailoverConfig{
+					Enabled:            true,
+					MaxAttempts:        3,
+					RetryOnStatuses:    []int{429, 500, 502, 503, 504},
+					RetryOnModelErrors: true,
+				},
+			},
+		},
 		Workflows: WorkflowsConfig{
 			RefreshInterval: time.Minute,
 		},
@@ -178,6 +192,9 @@ func Load() (*LoadResult, error) {
 	}
 
 	if err := loadFallbackConfig(&cfg.Fallback); err != nil {
+		return nil, err
+	}
+	if err := loadRoutingConfig(&cfg.Routing); err != nil {
 		return nil, err
 	}
 

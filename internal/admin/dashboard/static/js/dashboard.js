@@ -605,6 +605,12 @@ function dashboard() {
       if (typeof this.fetchModelOverrides === "function") {
         requests.push(this.fetchModelOverrides());
       }
+      if (typeof this.fetchRoutingState === "function") {
+        requests.push(this.fetchRoutingState());
+      }
+      if (typeof this.fetchRoutingPools === "function") {
+        requests.push(this.fetchRoutingPools());
+      }
       if (typeof this.fetchModelPricingOverrides === "function") {
         requests.push(this.fetchModelPricingOverrides());
       }

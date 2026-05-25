@@ -10,8 +10,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/config"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/routing"
 )
 
 type canonicalizingProvider struct {
@@ -141,6 +143,46 @@ func (aliasResolverStub) ResolveModel(requested core.RequestedModelSelector) (co
 	}
 	selector, err := requested.Normalize()
 	return selector, false, err
+}
+
+func TestResolveRequestModel_CanonicalPoolResolutionCarriesFallbackMetadata(t *testing.T) {
+	provider := &canonicalizingProvider{
+		resolved: map[string]core.ModelSelector{
+			"anthropic_b/claude-sonnet-4-6": {Provider: "anthropic_b", Model: "claude-sonnet-4-6"},
+		},
+		types: map[string]string{
+			"anthropic_b/claude-sonnet-4-6": "anthropic",
+		},
+		names: map[string]string{
+			"anthropic_b/claude-sonnet-4-6": "anthropic_b",
+		},
+	}
+
+	resolver := routing.NewComposedResolver(nil, routing.NewResolver(config.RoutingConfig{
+		Defaults: config.RoutingDefaultsConfig{Strategy: config.RoutingStrategyPriorityFailover},
+		ModelPools: map[string]config.ModelPoolConfig{
+			"claude-sonnet-4-6": {
+				Candidates: []config.ModelPoolCandidateConfig{
+					{Provider: "anthropic_b", Model: "claude-sonnet-4-6", Priority: 1},
+					{Provider: "anthropic_a", Model: "claude-sonnet-4-6-20250929", Priority: 2},
+				},
+			},
+		},
+	}))
+
+	resolution, err := resolveRequestModel(provider, resolver, core.NewRequestedModelSelector("claude-sonnet-4-6", ""))
+	if err != nil {
+		t.Fatalf("resolveRequestModel() error = %v", err)
+	}
+	if got := resolution.CanonicalModel; got != "claude-sonnet-4-6" {
+		t.Fatalf("CanonicalModel = %q, want claude-sonnet-4-6", got)
+	}
+	if got := resolution.RoutingStrategy; got != string(config.RoutingStrategyPriorityFailover) {
+		t.Fatalf("RoutingStrategy = %q, want %q", got, config.RoutingStrategyPriorityFailover)
+	}
+	if len(resolution.CanonicalPoolFallbacks) != 1 || resolution.CanonicalPoolFallbacks[0].QualifiedModel() != "anthropic_a/claude-sonnet-4-6-20250929" {
+		t.Fatalf("CanonicalPoolFallbacks = %v, want [anthropic_a/claude-sonnet-4-6-20250929]", resolution.CanonicalPoolFallbacks)
+	}
 }
 
 func TestResolveRequestModel_CanonicalizesAliasOutputThroughProviderResolver(t *testing.T) {

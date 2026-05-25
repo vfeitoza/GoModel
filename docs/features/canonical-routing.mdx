@@ -1,0 +1,333 @@
+---
+title: "Canonical Routing"
+description: "Route one public model name to multiple concrete provider candidates with priority failover, weighted distribution, session affinity, and admin controls."
+icon: "git-branch"
+keywords: ["routing", "failover", "session affinity", "canonical models", "model pools"]
+---
+
+## Overview
+
+GoModel can now expose one **stable public model name** while routing requests to
+one or more **exact provider/model candidates** behind the scenes.
+
+This is useful when:
+
+- multiple named provider accounts expose the same logical model under slightly different IDs;
+- one provider should be the normal primary and another should be a standby;
+- traffic should be distributed across equivalent backends;
+- operators need to disable a provider, a canonical model, or a single candidate without changing client requests.
+
+## What This Feature Adds
+
+Canonical routing introduces a new `routing` config block with:
+
+- per-pool routing strategies;
+- provider/model candidate lists;
+- intra-pool failover rules;
+- session affinity for repeated requests;
+- runtime-aware candidate filtering;
+- admin endpoints and dashboard controls for provider, canonical model, and candidate state.
+
+Clients keep sending the canonical model name. GoModel resolves it to the best
+currently eligible provider/model candidate.
+
+## Configuration
+
+### Top-level routing block
+
+```yaml
+routing:
+  defaults:
+    strategy: "priority_failover"
+    session_affinity: true
+    session_affinity_ttl: 30m
+    failover:
+      enabled: true
+      max_attempts: 3
+      retry_on_statuses: [429, 500, 502, 503, 504]
+      retry_on_model_errors: true
+```
+
+### Available defaults
+
+#### `routing.defaults.strategy`
+
+Controls how GoModel chooses the initial candidate inside each canonical pool.
+
+Supported values:
+
+- `priority_failover`
+- `weighted_round_robin`
+
+`priority_failover` always prefers the candidate with the lowest `priority`
+value. `weighted_round_robin` distributes requests by `weight`.
+
+#### `routing.defaults.session_affinity`
+
+When enabled, repeated requests for the same canonical model and the same
+request scope stay pinned to the same candidate while that candidate remains
+eligible.
+
+GoModel currently derives the affinity key from:
+
+1. `user_path`, when present;
+2. request ID as a fallback when no `user_path` is available.
+
+#### `routing.defaults.session_affinity_ttl`
+
+How long an affinity binding stays valid.
+
+If the pinned candidate becomes unavailable, unhealthy, or manually disabled,
+GoModel reselects a new candidate and refreshes the binding.
+
+#### `routing.defaults.failover.enabled`
+
+Enables failover to the next candidate in the same canonical pool.
+
+#### `routing.defaults.failover.max_attempts`
+
+Total number of attempts allowed within one canonical pool, including the first
+candidate.
+
+#### `routing.defaults.failover.retry_on_statuses`
+
+HTTP statuses that qualify for retry/failover inside the same pool.
+
+#### `routing.defaults.failover.retry_on_model_errors`
+
+Also fail over on model-unavailable, model-not-found, and model-unsupported
+style errors.
+
+## Model pools
+
+Canonical names are declared explicitly in `routing.model_pools`.
+
+```yaml
+routing:
+  defaults:
+    strategy: "priority_failover"
+    session_affinity: true
+    session_affinity_ttl: 30m
+    failover:
+      enabled: true
+      max_attempts: 3
+      retry_on_statuses: [429, 500, 502, 503, 504]
+      retry_on_model_errors: true
+
+  model_pools:
+    claude-sonnet-4-6:
+      candidates:
+        - provider: anthropic_primary
+          model: claude-sonnet-4-6
+          priority: 1
+        - provider: anthropic_backup
+          model: claude-sonnet-4-6-20250929
+          priority: 2
+```
+
+### Candidate fields
+
+Each candidate supports:
+
+- `provider`: configured provider instance name from `providers:`
+- `model`: exact provider-facing model ID
+- `priority`: required for `priority_failover`
+- `weight`: required for `weighted_round_robin`
+
+## Weighted distribution example
+
+```yaml
+routing:
+  defaults:
+    strategy: "weighted_round_robin"
+    session_affinity: true
+    session_affinity_ttl: 30m
+
+  model_pools:
+    claude-opus-4-7:
+      candidates:
+        - provider: anthropic_primary
+          model: claude-opus-4-7
+          weight: 10
+          priority: 1
+        - provider: anthropic_backup
+          model: claude-opus-4-7
+          weight: 6
+          priority: 2
+```
+
+Higher `weight` gets more traffic. `priority` still acts as a deterministic
+secondary ordering input.
+
+## Provider inventories and configured model lists
+
+Canonical routing works best when provider inventories are explicit and stable.
+
+`models.configured_provider_models_mode` still matters with canonical pools:
+
+- `fallback`: use configured provider model lists only when provider `/models` is unavailable or empty;
+- `allowlist`: expose only configured models and skip provider `/models` for providers that declare a list.
+
+This matters because pool candidates must reference exact provider model IDs
+that exist either in the live provider inventory or in `providers.<name>.models`.
+
+## Runtime eligibility rules
+
+GoModel now evaluates candidates using both **manual state** and **runtime
+health**.
+
+### Manual state
+
+A candidate may become ineligible because:
+
+- its provider was disabled manually;
+- the canonical model was disabled manually;
+- the candidate itself was disabled manually.
+
+### Runtime state
+
+GoModel classifies provider runtime as:
+
+- `healthy`
+- `degraded`
+- `unhealthy`
+
+Routing behavior:
+
+- `healthy`: eligible
+- `degraded`: still eligible, but marked degraded
+- `unhealthy`: removed from effective selection
+
+## `/v1/models` behavior
+
+`GET /v1/models` now reflects the same effective routing policy.
+
+For each canonical pool, GoModel exposes the model only when at least one
+candidate is effectively eligible.
+
+The model entry is derived from the **effective selected candidate**, not simply
+from the first configured candidate.
+
+## Admin API and dashboard
+
+This change adds operational state and routing visibility to the admin surface.
+
+### Admin endpoints
+
+- `GET /admin/routing-state`
+- `PUT /admin/routing-state`
+- `DELETE /admin/routing-state`
+- `GET /admin/routing/model-pools`
+
+### What the dashboard now shows
+
+For each candidate, the dashboard distinguishes:
+
+- **Config Primary**: the candidate preferred by pool configuration;
+- **Effective Candidate**: the candidate currently selected by the live routing decision.
+
+It also shows:
+
+- canonical model status;
+- candidate status;
+- runtime degradation;
+- blocked candidates and their reasons;
+- provider/canonical/candidate enable-disable controls.
+
+## Request observability
+
+Canonical routing now records structured routing metadata during request
+resolution and failover.
+
+Available fields include:
+
+- requested model
+- canonical model
+- routing strategy
+- config primary candidate
+- effective candidate
+- selected provider name
+- selected exact model
+- blocked candidates
+- failover usage
+- fallback target
+
+When a failover happens inside a canonical pool, GoModel updates the request
+resolution so downstream logging and diagnostics can tell which candidate was
+actually used.
+
+## Relationship to legacy fallback config
+
+The legacy `fallback` block still exists and remains useful for model-level
+fallback outside canonical pools.
+
+Canonical routing is different:
+
+- it is driven by explicit `routing.model_pools`;
+- it selects from candidates inside one canonical pool;
+- it applies pool-aware failover and session affinity;
+- it exposes pool state through the admin API and dashboard.
+
+## Recommended rollout
+
+1. Define named providers under `providers:`.
+2. Declare exact model IDs for each provider when needed.
+3. Create one canonical pool per public model name.
+4. Start with `priority_failover` for predictable behavior.
+5. Enable `session_affinity` if repeated scoped requests should stay pinned.
+6. Use the admin dashboard to verify effective candidates and blocked reasons.
+
+## Example complete config
+
+```yaml
+models:
+  configured_provider_models_mode: "allowlist"
+
+routing:
+  defaults:
+    strategy: "priority_failover"
+    session_affinity: true
+    session_affinity_ttl: 30m
+    failover:
+      enabled: true
+      max_attempts: 3
+      retry_on_statuses: [429, 500, 502, 503, 504]
+      retry_on_model_errors: true
+
+  model_pools:
+    claude-sonnet-4-6:
+      candidates:
+        - provider: anthropic_primary
+          model: claude-sonnet-4-6
+          priority: 1
+        - provider: anthropic_backup
+          model: claude-sonnet-4-6-20250929
+          priority: 2
+
+providers:
+  anthropic_primary:
+    type: anthropic
+    api_key: "${ANTHROPIC_PRIMARY_API_KEY}"
+    models:
+      - claude-sonnet-4-6
+
+  anthropic_backup:
+    type: anthropic
+    api_key: "${ANTHROPIC_BACKUP_API_KEY}"
+    models:
+      - claude-sonnet-4-6-20250929
+```
+
+## Summary
+
+This commit turns canonical model routing into a complete operator-facing
+feature with:
+
+- explicit canonical pools;
+- priority or weighted candidate selection;
+- session affinity;
+- runtime-aware routing eligibility;
+- intra-pool failover;
+- `/v1/models` alignment with effective routing;
+- admin/dashboard controls and visibility;
+- structured routing and failover metadata.

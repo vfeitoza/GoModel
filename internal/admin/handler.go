@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/config"
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
@@ -23,6 +24,7 @@ import (
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/routingstate"
 	"gomodel/internal/usage"
 	"gomodel/internal/workflows"
 )
@@ -38,6 +40,7 @@ type Handler struct {
 	aliases             *aliases.Service
 	modelOverrides      *modeloverrides.Service
 	pricingOverrides    *pricingoverrides.Service
+	routingState        *routingstate.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
 	guardrails          guardrails.Catalog
@@ -46,6 +49,7 @@ type Handler struct {
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
+	routingConfig       config.RoutingConfig
 
 	mutationMu sync.Mutex
 	pricingMu  sync.Mutex
@@ -201,6 +205,13 @@ func WithPricingOverrides(service *pricingoverrides.Service) Option {
 	}
 }
 
+// WithRoutingState enables routing state administration and status enrichment.
+func WithRoutingState(service *routingstate.Service) Option {
+	return func(h *Handler) {
+		h.routingState = service
+	}
+}
+
 // WithWorkflows enables workflow administration endpoints.
 func WithWorkflows(service *workflows.Service) Option {
 	return func(h *Handler) {
@@ -255,6 +266,13 @@ func WithRuntimeRefresher(refresher RuntimeRefresher) Option {
 func WithConfiguredProviders(configs []providers.SanitizedProviderConfig) Option {
 	return func(h *Handler) {
 		h.configuredProviders = cloneConfiguredProviders(configs)
+	}
+}
+
+// WithRoutingConfig enables canonical routing pool introspection in admin APIs.
+func WithRoutingConfig(cfg config.RoutingConfig) Option {
+	return func(h *Handler) {
+		h.routingConfig = cfg
 	}
 }
 

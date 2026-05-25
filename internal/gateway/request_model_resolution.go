@@ -63,12 +63,27 @@ func ResolveRequestModelWithAuthorizer(
 ) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
-	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(provider, resolver, requested)
+	resolvedSelector, aliasApplied, err := ResolveExecutionSelectorWithContext(ctx, provider, resolver, requested)
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	}
 	if resolvedSelector == (core.ModelSelector{}) {
 		resolvedSelector, err = requested.Normalize()
+		if err != nil {
+			return nil, core.NewInvalidRequestError(err.Error(), err)
+		}
+	}
+
+	var canonicalResolution *core.CanonicalRoutingResolution
+	if canonicalResolver, ok := resolver.(interface {
+		ResolveWithContext(context.Context, core.RequestedModelSelector) (*core.CanonicalRoutingResolution, bool, error)
+	}); ok {
+		canonicalResolution, _, err = canonicalResolver.ResolveWithContext(ctx, requested)
+		if err != nil {
+			return nil, core.NewInvalidRequestError(err.Error(), err)
+		}
+	} else if canonicalResolver, ok := resolver.(core.CanonicalRoutingResolver); ok {
+		canonicalResolution, _, err = canonicalResolver.Resolve(requested)
 		if err != nil {
 			return nil, core.NewInvalidRequestError(err.Error(), err)
 		}
@@ -87,17 +102,37 @@ func ResolveRequestModelWithAuthorizer(
 		}
 	}
 
-	return &core.RequestModelResolution{
+	resolution := &core.RequestModelResolution{
 		Requested:        requested,
 		ResolvedSelector: resolvedSelector,
 		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
 		ProviderName:     ResolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
-	}, nil
+	}
+	if canonicalResolution != nil {
+		resolution.CanonicalModel = canonicalResolution.CanonicalModel
+		resolution.CanonicalPoolFallbacks = append([]core.ModelSelector(nil), canonicalResolution.Fallbacks...)
+		resolution.RoutingStrategy = string(canonicalResolution.Strategy)
+		resolution.ConfigPrimary = canonicalResolution.ConfigPrimary
+		resolution.EffectiveCandidate = canonicalResolution.EffectiveCandidate
+		resolution.SelectedProviderName = canonicalResolution.SelectedProviderName
+		resolution.SelectedExactModel = canonicalResolution.SelectedExactModel
+		resolution.BlockedCandidates = append([]core.BlockedCandidate(nil), canonicalResolution.BlockedCandidates...)
+	}
+	return resolution, nil
 }
 
 // ResolveExecutionSelector applies explicit and provider-owned selector resolution.
 func ResolveExecutionSelector(
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	requested core.RequestedModelSelector,
+) (core.ModelSelector, bool, error) {
+	return ResolveExecutionSelectorWithContext(context.Background(), provider, resolver, requested)
+}
+
+func ResolveExecutionSelectorWithContext(
+	ctx context.Context,
 	provider core.RoutableProvider,
 	resolver ModelResolver,
 	requested core.RequestedModelSelector,
@@ -111,7 +146,13 @@ func ResolveExecutionSelector(
 	)
 
 	if resolver != nil {
-		resolvedSelector, aliasApplied, err = resolver.ResolveModel(requested)
+		if contextual, ok := resolver.(interface {
+			ResolveModelWithContext(context.Context, core.RequestedModelSelector) (core.ModelSelector, bool, error)
+		}); ok {
+			resolvedSelector, aliasApplied, err = contextual.ResolveModelWithContext(ctx, requested)
+		} else {
+			resolvedSelector, aliasApplied, err = resolver.ResolveModel(requested)
+		}
 		if err != nil {
 			return core.ModelSelector{}, false, err
 		}

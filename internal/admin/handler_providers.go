@@ -10,6 +10,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
+	"gomodel/internal/routingstate"
 )
 
 func (h *Handler) ProviderStatus(c *echo.Context) error {
@@ -49,7 +50,7 @@ func (h *Handler) buildProviderStatusResponse() providerStatusResponse {
 	}
 
 	for _, name := range names {
-		item := buildProviderStatusItem(name, configuredByName[name], runtimeByName[name])
+		item := buildProviderStatusItem(name, configuredByName[name], runtimeByName[name], h.routingState)
 		resp.Providers = append(resp.Providers, item)
 		resp.Summary.Total++
 		switch item.Status {
@@ -109,12 +110,18 @@ func (h *Handler) collectProviderStatusInputs() (
 // buildProviderStatusItem reconciles cfg/runtime gaps for a single provider
 // (either side may be zero-valued when only one source knows the name) and
 // produces the response row.
-func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot) providerStatusItemResponse {
+func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot, state *routingstate.Service) providerStatusItemResponse {
 	// Classify against the inputs as-given so the "Unknown" branch in
 	// classifyProviderStatus stays reachable for runtime-only providers.
 	// Synthesising cfg.Name first would always make the provider look
 	// configured to the classifier.
 	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
+	if state != nil && !state.ProviderEnabled(name) {
+		status = "degraded"
+		label = "Disabled"
+		reason = "provider disabled manually"
+		lastError = ""
+	}
 
 	// For the response row, fill in display fallbacks from the peer side.
 	if strings.TrimSpace(cfg.Name) == "" {

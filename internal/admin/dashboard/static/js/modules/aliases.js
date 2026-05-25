@@ -5,6 +5,9 @@
             aliasesAvailable: true,
             modelOverridesAvailable: true,
             modelOverrideViews: [],
+            routingStateViews: [],
+            routingPools: [],
+            routingStateAvailable: true,
             displayModels: [],
             aliasLoading: false,
             aliasError: '',
@@ -36,6 +39,16 @@
             },
 
             buildDisplayModels() {
+                const routingCandidates = new Map();
+                for (const pool of this.routingPools || []) {
+                    const canonical = String(pool && pool.canonical_model || '').trim();
+                    const candidates = Array.isArray(pool && pool.candidates) ? pool.candidates : [];
+                    for (const candidate of candidates) {
+                        const key = String(candidate && candidate.provider_name || '').trim() + '/' + String(candidate && candidate.model || '').trim();
+                        if (!key || !canonical) continue;
+                        routingCandidates.set(key, { canonical_model: canonical, routing_state: candidate, pool });
+                    }
+                }
                 const rows = this.models.map((model) => ({
                     key: 'model:' + this.qualifiedModelName(model),
                     display_name: this.qualifiedModelName(model),
@@ -49,7 +62,20 @@
                     kind_badge: '',
                     masking_alias: null,
                     alias_state_class: '',
-                    alias_state_text: ''
+                    alias_state_text: '',
+                    canonical_model: (routingCandidates.get(this.qualifiedModelName(model)) || {}).canonical_model || '',
+                    routing_state: (routingCandidates.get(this.qualifiedModelName(model)) || {}).routing_state || null,
+                    routing_pool: (routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || null,
+                    canonical_enabled: (routingCandidates.get(this.qualifiedModelName(model)) || {}).pool ? ((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool.enabled !== false) : true,
+                    canonical_status: ((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || {}).status || '',
+                    canonical_reason: ((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || {}).status_reason || '',
+                    routing_strategy: ((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || {}).strategy || '',
+                    candidate_priority: (((routingCandidates.get(this.qualifiedModelName(model)) || {}).routing_state || {}).priority ?? null),
+                    candidate_weight: (((routingCandidates.get(this.qualifiedModelName(model)) || {}).routing_state || {}).weight ?? null),
+                    is_config_primary: Boolean(((routingCandidates.get(this.qualifiedModelName(model)) || {}).routing_state || {}).is_config_primary),
+                    is_effective_candidate: Boolean(((routingCandidates.get(this.qualifiedModelName(model)) || {}).routing_state || {}).is_effective_candidate),
+                    effective_candidate: (((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || {}).effective_candidate || ''),
+                    config_primary_candidate: (((routingCandidates.get(this.qualifiedModelName(model)) || {}).pool || {}).config_primary_candidate || '')
                 }));
 
                 if (!this.aliasesAvailable) {
@@ -187,6 +213,58 @@
                 }
             },
 
+            async fetchRoutingState() {
+                try {
+                    const request = this.adminRequestOptions();
+                    const res = await fetch('/admin/routing-state', request);
+                    if (res.status === 503) {
+                        this.routingStateAvailable = false;
+                        this.routingStateViews = [];
+                        this.routingPools = [];
+                        this.syncDisplayModels();
+                        return;
+                    }
+                    const handled = this.handleFetchResponse(res, 'routing state', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.routingStateViews = [];
+                        this.routingPools = [];
+                        this.syncDisplayModels();
+                        return;
+                    }
+                    this.routingStateAvailable = true;
+                    const payload = await res.json();
+                    this.routingStateViews = Array.isArray(payload) ? payload : [];
+                } catch (e) {
+                    console.error('Failed to fetch routing state:', e);
+                    this.routingStateViews = [];
+                }
+            },
+
+            async fetchRoutingPools() {
+                try {
+                    const request = this.adminRequestOptions();
+                    const res = await fetch('/admin/routing/model-pools', request);
+                    const handled = this.handleFetchResponse(res, 'routing model pools', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.routingPools = [];
+                        this.syncDisplayModels();
+                        return;
+                    }
+                    const payload = await res.json();
+                    this.routingPools = Array.isArray(payload) ? payload : [];
+                    this.syncDisplayModels();
+                } catch (e) {
+                    console.error('Failed to fetch routing pools:', e);
+                    this.routingPools = [];
+                }
+            },
+
             async fetchModelOverrides() {
                 this.modelOverrideError = '';
                 try {
@@ -263,9 +341,23 @@
                 return Array.from(groups.values())
                     .map((group) => {
                         const access = this.providerGroupAccess(group.provider_name, group.provider_type, overridesBySelector);
+                        const providerRoutingEnabled = this.providerRoutingEnabled(group.provider_name);
+                        const seenCanonicals = new Set();
+                        group.rows = group.rows.map((row) => {
+                            const canonical = String(row && row.canonical_model || '').trim();
+                            const showCanonicalControls = canonical && !seenCanonicals.has(canonical);
+                            if (canonical) {
+                                seenCanonicals.add(canonical);
+                            }
+                            return {
+                                ...row,
+                                show_canonical_controls: Boolean(showCanonicalControls)
+                            };
+                        });
                         return {
                             ...group,
                             access,
+                            provider_routing_enabled: providerRoutingEnabled,
                             access_summary: this.modelAccessSummary(access),
                             item_count_label: this.providerGroupItemCountLabel(group.rows)
                         };
@@ -381,6 +473,60 @@
                     user_paths: userPaths,
                     override
                 };
+            },
+
+            providerRoutingEnabled(providerName) {
+                const normalized = String(providerName || '').trim();
+                if (!normalized) return true;
+                for (const entry of this.routingStateViews || []) {
+                    if (String(entry && entry.kind || '').trim() === 'provider' && String(entry && entry.provider_name || '').trim() === normalized) {
+                        return entry.enabled !== false;
+                    }
+                }
+                return true;
+            },
+
+            async submitRoutingStateChange(payload) {
+                const request = this.adminRequestOptions({ method: 'PUT', body: JSON.stringify(payload) });
+                const res = await fetch('/admin/routing-state', request);
+                const handled = this.handleFetchResponse(res, 'routing state update', request);
+                if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                    return false;
+                }
+                if (!handled) {
+                    return false;
+                }
+                await Promise.all([this.fetchRoutingState(), this.fetchRoutingPools()]);
+                return true;
+            },
+
+            async toggleProviderEnabled(group) {
+                if (!group || !group.provider_name) return;
+                await this.submitRoutingStateChange({
+                    kind: 'provider',
+                    provider_name: group.provider_name,
+                    enabled: !group.provider_routing_enabled
+                });
+            },
+
+            async togglePoolCandidateEnabled(row) {
+                if (!row || !row.provider_name || !row.model || !row.model.id) return;
+                const enabled = !(row.routing_state && row.routing_state.candidate_enabled === false);
+                await this.submitRoutingStateChange({
+                    kind: 'pool_candidate',
+                    provider_name: row.provider_name,
+                    model: row.model.id,
+                    enabled: !enabled
+                });
+            },
+
+            async toggleCanonicalModelEnabled(row) {
+                if (!row || !row.canonical_model) return;
+                await this.submitRoutingStateChange({
+                    kind: 'canonical_model',
+                    canonical_model: row.canonical_model,
+                    enabled: !(row.canonical_enabled === false)
+                });
             },
 
             providerGroupItemCountLabel(rows) {

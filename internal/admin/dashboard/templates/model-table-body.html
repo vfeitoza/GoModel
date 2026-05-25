@@ -22,6 +22,10 @@
                             @click="openProviderPricingOverrideEdit(group)">
                             {{template "dollar-icon"}}
                         </button>
+                        <button type="button" class="alias-toggle" x-show="routingStateAvailable && group.provider_name" :class="{ enabled: group.provider_routing_enabled !== false }" @click="toggleProviderEnabled(group)">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="group.provider_routing_enabled !== false ? 'Provider Active' : 'Provider Disabled'"></span>
+                        </button>
                         <button type="button" class="table-action-btn table-icon-btn"
                             x-show="modelOverridesAvailable && group.access.selector"
                             :class="modelOverrideEditButtonClass(hasAccessOverride(group.access))"
@@ -47,6 +51,14 @@
                         </div>
                         <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
                             Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                        </div>
+                        <div class="model-name-secondary" x-show="!row.is_alias && row.canonical_model && row.show_canonical_controls">
+                            Canonical <span class="mono font-size-md" x-text="row.canonical_model"></span>
+                            <span x-show="row.routing_strategy" x-text="' · Strategy: ' + row.routing_strategy"></span>
+                            <span x-show="row.candidate_priority !== null" x-text="' · Priority: ' + row.candidate_priority"></span>
+                            <span x-show="row.candidate_weight !== null && row.candidate_weight !== 0" x-text="' · Weight: ' + row.candidate_weight"></span>
+                            <span x-show="row.is_config_primary" x-text="' · Config Primary'"></span>
+                            <span x-show="row.is_effective_candidate" x-text="' · Effective'"></span>
                         </div>
                     </div>
                 </td>
@@ -86,6 +98,18 @@
                     <template x-if="!row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
                             <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                            <span class="model-access-state-badge" x-show="row.canonical_model && row.show_canonical_controls" :class="row.canonical_enabled === false ? 'is-disabled' : (row.canonical_status === 'degraded' ? 'is-restricted' : 'is-enabled')" x-text="row.canonical_enabled === false ? 'Canonical Disabled' : (row.canonical_status === 'degraded' ? 'Canonical Degraded' : 'Canonical Enabled')"></span>
+                            <span class="model-access-state-badge" x-show="row.routing_state" :class="row.routing_state && row.routing_state.status === 'disabled_manual' ? 'is-disabled' : (row.routing_state && row.routing_state.status === 'degraded_runtime' ? 'is-restricted' : 'is-enabled')" x-text="row.routing_state && row.routing_state.status === 'disabled_manual' ? 'Candidate Disabled' : (row.routing_state && row.routing_state.status === 'degraded_runtime' ? 'Candidate Degraded' : (row.routing_state ? 'Candidate Enabled' : ''))"></span>
+                            <span class="model-access-state-badge" x-show="row.is_effective_candidate" :class="'is-enabled'" x-text="'Effective Candidate'"></span>
+                            <span class="model-access-state-badge" x-show="row.is_config_primary && !row.is_effective_candidate" :class="'is-restricted'" x-text="'Config Primary'"></span>
+                            <button type="button" class="alias-toggle" x-show="routingStateAvailable && row.canonical_model && row.show_canonical_controls" :class="{ enabled: row.canonical_enabled !== false }" @click="toggleCanonicalModelEnabled(row)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="row.canonical_enabled === false ? 'Canonical Disabled' : 'Canonical Active'"></span>
+                            </button>
+                            <button type="button" class="alias-toggle" x-show="routingStateAvailable && row.routing_state" :class="{ enabled: !(row.routing_state && row.routing_state.candidate_enabled === false) }" @click="togglePoolCandidateEnabled(row)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="row.routing_state && row.routing_state.candidate_enabled === false ? 'Candidate Disabled' : 'Candidate Active'"></span>
+                            </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="modelPricingOverridesAvailable"
                                 :class="modelPricingButtonClass(hasModelPricingOverride(row))"

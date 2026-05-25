@@ -13,7 +13,13 @@ import (
 
 // FallbackSelectors returns fallback selectors for a translated workflow.
 func (o *InferenceOrchestrator) FallbackSelectors(workflow *core.Workflow) []core.ModelSelector {
-	if o.fallbackResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FallbackEnabled() {
+	if o.fallbackResolver == nil || workflow == nil || workflow.Resolution == nil {
+		return nil
+	}
+	if workflow.Resolution.CanonicalModel != "" && len(workflow.Resolution.CanonicalPoolFallbacks) > 0 {
+		return o.fallbackResolver.ResolveFallbacks(workflow.Resolution, workflow.Endpoint.Operation)
+	}
+	if !workflow.FallbackEnabled() {
 		return nil
 	}
 	return o.fallbackResolver.ResolveFallbacks(workflow.Resolution, workflow.Endpoint.Operation)
@@ -48,14 +54,23 @@ func tryFallbackResponse[T any](
 	var zero T
 
 	fallbacks := o.FallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !ShouldAttemptFallback(primaryErr) {
+	shouldAttempt := ShouldAttemptFallback(primaryErr)
+	if workflow != nil && workflow.Resolution != nil && workflow.Resolution.CanonicalModel != "" {
+		shouldAttempt = o.failoverPolicy.ShouldAttempt(primaryErr)
+	}
+	if len(fallbacks) == 0 || !shouldAttempt {
 		return zero, "", "", "", false, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
+	canonicalPool := workflow != nil && workflow.Resolution != nil && workflow.Resolution.CanonicalModel != ""
+	attempts := 0
 	for _, selector := range fallbacks {
+		if canonicalPool && o.failoverPolicy.MaxAttempts > 0 && attempts >= o.failoverPolicy.MaxAttempts-1 {
+			break
+		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
@@ -70,6 +85,7 @@ func tryFallbackResponse[T any](
 			"error", lastErr,
 		)
 
+		attempts++
 		resp, resolvedProviderType, err := call(selector, providerType, providerName)
 		if err == nil {
 			slog.Info("fallback model attempt succeeded",
@@ -78,6 +94,7 @@ func tryFallbackResponse[T any](
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
+			markWorkflowFailover(workflow, selector, providerName, qualified)
 			return resp, resolvedProviderType, providerName, qualified, true, nil
 		}
 		lastErr = err
@@ -139,14 +156,23 @@ func tryFallbackStream(
 	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
 ) (io.ReadCloser, string, string, string, string, error) {
 	fallbacks := o.FallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !ShouldAttemptFallback(primaryErr) {
+	shouldAttempt := ShouldAttemptFallback(primaryErr)
+	if workflow != nil && workflow.Resolution != nil && workflow.Resolution.CanonicalModel != "" {
+		shouldAttempt = o.failoverPolicy.ShouldAttempt(primaryErr)
+	}
+	if len(fallbacks) == 0 || !shouldAttempt {
 		return nil, "", "", "", "", primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
+	canonicalPool := workflow != nil && workflow.Resolution != nil && workflow.Resolution.CanonicalModel != ""
+	attempts := 0
 	for _, selector := range fallbacks {
+		if canonicalPool && o.failoverPolicy.MaxAttempts > 0 && attempts >= o.failoverPolicy.MaxAttempts-1 {
+			break
+		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
@@ -161,6 +187,7 @@ func tryFallbackStream(
 			"error", lastErr,
 		)
 
+		attempts++
 		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
 		if err == nil {
 			slog.Info("fallback stream attempt succeeded",
@@ -169,12 +196,24 @@ func tryFallbackStream(
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
+			markWorkflowFailover(workflow, selector, providerName, qualified)
 			return stream, resolvedProviderType, providerName, usageModel, qualified, nil
 		}
 		lastErr = err
 	}
 
 	return nil, "", "", "", "", lastErr
+}
+
+func markWorkflowFailover(workflow *core.Workflow, selector core.ModelSelector, providerName, qualified string) {
+	if workflow == nil || workflow.Resolution == nil {
+		return
+	}
+	workflow.Resolution.FailoverUsed = true
+	workflow.Resolution.FallbackTarget = strings.TrimSpace(qualified)
+	workflow.Resolution.EffectiveCandidate = selector
+	workflow.Resolution.SelectedProviderName = strings.TrimSpace(providerName)
+	workflow.Resolution.SelectedExactModel = selector.Model
 }
 
 // ShouldAttemptFallback reports whether err should trigger translated fallback.

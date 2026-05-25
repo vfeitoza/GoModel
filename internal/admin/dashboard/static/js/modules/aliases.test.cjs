@@ -201,6 +201,41 @@ test('alias mutations send alias name in JSON body', async() => {
     });
 });
 
+test('buildDisplayModels marks config primary and effective candidate from routing pools', () => {
+    const module = createAliasesModule();
+    module.models = [{
+        provider_name: 'anthropic_b',
+        provider_type: 'anthropic',
+        model: {
+            id: 'claude-sonnet-4-6',
+            object: 'model',
+            owned_by: 'anthropic',
+            metadata: { modes: ['chat'], categories: ['text_generation'] }
+        }
+    }];
+    module.routingPools = [{
+        canonical_model: 'claude-sonnet-4-6',
+        strategy: 'priority_failover',
+        effective_candidate: 'anthropic_b/claude-sonnet-4-6',
+        config_primary_candidate: 'anthropic_b/claude-sonnet-4-6',
+        candidates: [{
+            provider_name: 'anthropic_b',
+            model: 'claude-sonnet-4-6',
+            priority: 1,
+            is_config_primary: true,
+            is_effective_candidate: true
+        }]
+    }];
+    module.aliases = [];
+    module.aliasesAvailable = true;
+    module.syncDisplayModels();
+
+    assert.equal(module.displayModels.length, 1);
+    assert.equal(module.displayModels[0].is_config_primary, true);
+    assert.equal(module.displayModels[0].is_effective_candidate, true);
+    assert.equal(module.displayModels[0].effective_candidate, 'anthropic_b/claude-sonnet-4-6');
+});
+
 test('filteredDisplayModelGroups groups rows by provider_name and applies provider-wide overrides', () => {
     const module = createAliasesModule();
     module.models = [

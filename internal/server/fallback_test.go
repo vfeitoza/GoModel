@@ -170,6 +170,16 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
 		t.Fatalf("failover target = %q, want %q", got, "azure/gpt-4o")
 	}
+	workflow := core.GetWorkflow(c.Request().Context())
+	if workflow == nil || workflow.Resolution == nil {
+		t.Fatal("expected workflow resolution to be available")
+	}
+	if !workflow.Resolution.FailoverUsed {
+		t.Fatal("expected resolution to record failover usage")
+	}
+	if got := workflow.Resolution.FallbackTarget; got != "azure/gpt-4o" {
+		t.Fatalf("resolution fallback target = %q, want %q", got, "azure/gpt-4o")
+	}
 }
 
 func TestChatCompletion_DoesNotFallbackOnNonAvailabilityError(t *testing.T) {

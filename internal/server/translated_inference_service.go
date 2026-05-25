@@ -18,6 +18,7 @@ import (
 	"gomodel/internal/gateway"
 	"gomodel/internal/observability"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/routing"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/streaming"
 	"gomodel/internal/usage"
@@ -38,6 +39,7 @@ type translatedInferenceService struct {
 	pricingResolver          usage.PricingResolver
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
+	failoverPolicy           routing.FailoverPolicy
 	responseStore            responsestore.Store
 	responseStoreMu          sync.RWMutex
 
@@ -64,6 +66,7 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		ModelAuthorizer:          s.modelAuthorizer,
 		WorkflowPolicyResolver:   s.workflowPolicyResolver,
 		FallbackResolver:         s.fallbackResolver,
+		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,

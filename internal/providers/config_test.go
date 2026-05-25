@@ -63,6 +63,26 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	},
 }
 
+func clearProviderConfigEnvVars(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
+		"GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODELS",
+		"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODELS",
+		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
+		"GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODELS",
+		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODELS",
+		"ZAI_API_KEY", "ZAI_BASE_URL", "ZAI_MODELS",
+		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION", "AZURE_MODELS",
+		"ORACLE_API_KEY", "ORACLE_BASE_URL", "ORACLE_MODELS",
+		"VLLM_API_KEY", "VLLM_BASE_URL", "VLLM_MODELS",
+		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 // --- buildProviderConfig ---
 
 func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
@@ -1517,6 +1537,7 @@ func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *te
 }
 
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
+	clearProviderConfigEnvVars(t)
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))

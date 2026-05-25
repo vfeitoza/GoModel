@@ -14,6 +14,7 @@ import (
 	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
+	"gomodel/internal/routing"
 	"gomodel/internal/usage"
 )
 
@@ -41,6 +42,7 @@ type Handler struct {
 	enabledPassthroughProviders     map[string]struct{}
 	responseCache                   *responsecache.ResponseCacheMiddleware
 	guardrailsHash                  string
+	failoverPolicy                  routing.FailoverPolicy
 
 	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
 	translatedSvcOnce sync.Once
@@ -167,6 +169,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			pricingResolver:          h.pricingResolver,
 			responseCache:            h.responseCache,
 			guardrailsHash:           h.guardrailsHash,
+			failoverPolicy:           h.failoverPolicy,
 			responseStore:            h.currentResponseStore(),
 		}
 		s.initHandlers()

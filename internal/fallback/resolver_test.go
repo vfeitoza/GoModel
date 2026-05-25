@@ -90,6 +90,29 @@ func TestResolverAutoModeAppendsRankingCandidates(t *testing.T) {
 	}
 }
 
+func TestResolverPrefersCanonicalPoolFallbacksWhenPresent(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfo("claude-sonnet-4-6", "anthropic_b", "anthropic", 1287, "claude-sonnet-4-6"),
+		modelInfo("claude-sonnet-4-6-20250929", "anthropic_a", "anthropic", 1287, "claude-sonnet-4-6"),
+	)
+
+	resolver := NewResolver(config.FallbackConfig{DefaultMode: config.FallbackModeAuto}, registry)
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:              core.NewRequestedModelSelector("claude-sonnet-4-6", ""),
+		ResolvedSelector:       core.ModelSelector{Model: "claude-sonnet-4-6", Provider: "anthropic_b"},
+		ProviderType:          "anthropic",
+		CanonicalModel:        "claude-sonnet-4-6",
+		CanonicalPoolFallbacks: []core.ModelSelector{{Provider: "anthropic_a", Model: "claude-sonnet-4-6-20250929"}},
+	}, core.OperationChatCompletions)
+
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].QualifiedModel() != "anthropic_a/claude-sonnet-4-6-20250929" {
+		t.Fatalf("got[0] = %q, want anthropic_a/claude-sonnet-4-6-20250929", got[0].QualifiedModel())
+	}
+}
+
 func TestResolverBlankDefaultModeUsesManualFallback(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
