@@ -84,18 +84,47 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 // convertMessages flattens the Anthropic system prompt and messages into the
 // canonical message list. A single Anthropic message may expand into multiple
 // canonical messages: tool_result blocks become standalone role:"tool" messages.
+// Messages with role "system" in the messages array are extracted and prepended
+// to the system prompt, as the Anthropic Messages API requires system content
+// to be in the top-level system field, not in messages.
 func convertMessages(req *MessagesRequest) ([]core.Message, error) {
 	out := make([]core.Message, 0, len(req.Messages)+1)
 
+	// Collect system messages from the messages array
+	var systemMessages []string
+	filteredMessages := make([]Message, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		if msg.Role == "system" {
+			// Extract system content from message
+			text, err := systemText(msg.Content)
+			if err != nil {
+				return nil, core.NewInvalidRequestError("system message content: "+err.Error(), err)
+			}
+			if text != "" {
+				systemMessages = append(systemMessages, text)
+			}
+		} else {
+			filteredMessages = append(filteredMessages, msg)
+		}
+	}
+
+	// Build the system prompt by combining existing system field and system messages
 	system, err := systemText(req.System)
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
+	}
+	if len(systemMessages) > 0 {
+		if system != "" {
+			system = strings.TrimSpace(system + "\n\n" + strings.Join(systemMessages, "\n\n"))
+		} else {
+			system = strings.TrimSpace(strings.Join(systemMessages, "\n\n"))
+		}
 	}
 	if system != "" {
 		out = append(out, core.Message{Role: "system", Content: system})
 	}
 
-	for i, msg := range req.Messages {
+	for i, msg := range filteredMessages {
 		if msg.Role != "user" && msg.Role != "assistant" {
 			return nil, core.NewInvalidRequestError(
 				fmt.Sprintf("messages[%d].role must be \"user\" or \"assistant\"", i), nil)
