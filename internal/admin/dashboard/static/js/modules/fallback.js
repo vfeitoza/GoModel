@@ -20,10 +20,13 @@ function dashboardFallbackModule() {
 
     async fetchRules() {
       try {
-        const response = await fetch("/admin/fallback/rules", {
-          headers: { Authorization: `Bearer ${this.masterKey}` },
-        });
-        if (!response.ok) throw new Error("Failed to fetch fallback rules");
+        const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+        const response = await fetch("/admin/fallback/rules", request);
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch fallback rules");
+        }
+
         const data = await response.json();
         this.rules = data.rules || [];
       } catch (error) {
@@ -152,10 +155,11 @@ function dashboardFallbackModule() {
 
       this.isSaving = true;
       try {
+        const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
         const response = await fetch("/admin/fallback/rules", {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${this.masterKey}`,
+            ...request.headers,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -185,11 +189,12 @@ function dashboardFallbackModule() {
 
       this.isDeleting[sourceModel] = true;
       try {
+        const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
         const response = await fetch(
           `/admin/fallback/rules/${encodeURIComponent(sourceModel)}`,
           {
             method: "DELETE",
-            headers: { Authorization: `Bearer ${this.masterKey}` },
+            headers: request.headers,
           }
         );
 
