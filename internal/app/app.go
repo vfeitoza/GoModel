@@ -29,6 +29,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
+	"gomodel/internal/provideroverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/server"
@@ -50,6 +51,7 @@ type App struct {
 	aliases          *aliases.Result
 	modelOverrides   *modeloverrides.Result
 	pricingOverrides *pricingoverrides.Result
+	providerOverrides *provideroverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
 	workflows        *workflows.Result
@@ -271,6 +273,24 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize model pricing overrides: %w", err)
 	}
 	app.pricingOverrides = pricingOverrideResult
+
+	// Initialize provider overrides
+	var providerOverrideResult *provideroverrides.Result
+	sharedProviderOverrideStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, fileStoreResult.Storage, aliasResult.Storage, modelOverrideResult.Storage, pricingOverrideResult.Storage)
+	if sharedProviderOverrideStorage != nil {
+		providerOverrideResult, err = provideroverrides.NewWithSharedStorage(ctx, appCfg, sharedProviderOverrideStorage, providerResult.Registry)
+	} else {
+		providerOverrideResult, err = provideroverrides.New(ctx, appCfg, providerResult.Registry)
+	}
+	if err != nil {
+		closeErr := errors.Join(app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.fileStore.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize provider overrides: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize provider overrides: %w", err)
+	}
+	app.providerOverrides = providerOverrideResult
+
 	pricingResolver := usage.PricingResolver(providerResult.Registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		pricingResolver = app.pricingOverrides.Service
@@ -464,6 +484,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.aliases.Service,
 			app.modelOverrides.Service,
 			app.pricingOverrides.Service,
+			app.providerOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
 			budgetResult.Service,
@@ -914,6 +935,7 @@ func initAdmin(
 	aliasService *aliases.Service,
 	modelOverrideService *modeloverrides.Service,
 	pricingOverrideService *pricingoverrides.Service,
+	providerOverrideService *provideroverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	budgetService *budget.Service,
@@ -973,6 +995,7 @@ func initAdmin(
 		admin.WithAliases(aliasService),
 		admin.WithModelOverrides(modelOverrideService),
 		admin.WithPricingOverrides(pricingOverrideService),
+		admin.WithProviderOverrides(providerOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),

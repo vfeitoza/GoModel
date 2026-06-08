@@ -61,6 +61,11 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/aliases", h.UpsertAlias)
 	g.DELETE("/aliases", h.DeleteAlias)
 
+	g.GET("/provider-overrides", h.ListProviderOverrides)
+	g.PUT("/provider-overrides", h.UpsertProviderOverride)
+	g.GET("/provider-overrides/:name", h.GetProviderOverride)
+	g.DELETE("/provider-overrides/:name", h.DeleteProviderOverride)
+
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)
 	g.PUT("/guardrails", h.UpsertGuardrail)

@@ -512,6 +512,23 @@ func (r *ModelRegistry) ProviderNames() []string {
 	return result
 }
 
+// ProviderExists returns true if a provider with the given name is registered.
+func (r *ModelRegistry) ProviderExists(providerName string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerName = strings.TrimSpace(strings.ToLower(providerName))
+	if providerName == "" {
+		return false
+	}
+	for _, p := range r.providers {
+		if strings.TrimSpace(strings.ToLower(r.providerNames[p])) == providerName {
+			return true
+		}
+	}
+	return false
+}
+
 func splitModelSelector(model string) (providerName, modelID string) {
 	model = strings.TrimSpace(model)
 	if model == "" {

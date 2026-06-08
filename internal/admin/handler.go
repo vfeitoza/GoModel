@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
+	"gomodel/internal/provideroverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
 	"gomodel/internal/workflows"
@@ -38,6 +39,7 @@ type Handler struct {
 	aliases             *aliases.Service
 	modelOverrides      *modeloverrides.Service
 	pricingOverrides    *pricingoverrides.Service
+	providerOverrides   *provideroverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
 	guardrails          guardrails.Catalog
@@ -198,6 +200,13 @@ func WithModelOverrides(service *modeloverrides.Service) Option {
 func WithPricingOverrides(service *pricingoverrides.Service) Option {
 	return func(h *Handler) {
 		h.pricingOverrides = service
+	}
+}
+
+// WithProviderOverrides enables provider override administration endpoints.
+func WithProviderOverrides(service *provideroverrides.Service) Option {
+	return func(h *Handler) {
+		h.providerOverrides = service
 	}
 }
 
