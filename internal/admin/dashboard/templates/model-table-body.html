@@ -13,6 +13,14 @@
                         <div class="provider-group-summary" x-show="group.access_summary" x-text="group.access_summary"></div>
                     </div>
                     <div class="alias-actions-cell model-list-actions">
+                        <button type="button" class="alias-toggle"
+                            x-show="providerOverridesAvailable && group.provider_name"
+                            :class="{ enabled: !isProviderDisabled(group.provider_name) }"
+                            :disabled="isProviderToggling(group.provider_name)"
+                            @click="toggleProviderEnabled(group.provider_name)">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="isProviderToggling(group.provider_name) ? '...' : (!isProviderDisabled(group.provider_name) ? 'Active' : 'Disabled')"></span>
+                        </button>
                         <span class="model-access-state-badge" :class="modelAccessStateClass(group.access)" x-text="modelAccessStateText(group.access)"></span>
                         <button type="button" class="table-action-btn table-icon-btn"
                             x-show="modelPricingOverridesAvailable && group.provider_name"

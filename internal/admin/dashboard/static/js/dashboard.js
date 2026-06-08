@@ -1096,6 +1096,12 @@ function dashboard() {
       "dashboardAliasesModule",
     ),
     resolveModuleFactory(
+      typeof dashboardProviderOverridesModule === "function"
+        ? dashboardProviderOverridesModule
+        : null,
+      "dashboardProviderOverridesModule",
+    ),
+    resolveModuleFactory(
       typeof dashboardModelPricingOverridesModule === "function"
         ? dashboardModelPricingOverridesModule
         : null,

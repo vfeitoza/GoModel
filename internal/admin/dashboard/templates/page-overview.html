@@ -162,6 +162,14 @@
                             </h4>
                         </div>
                         <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" x-text="provider.status_label"></span>
+                        <button type="button"
+                                class="alias-toggle"
+                                :class="{ enabled: !isProviderDisabled(provider.name) }"
+                                :disabled="isProviderToggling(provider.name)"
+                                @click="toggleProviderEnabled(provider.name)">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="isProviderToggling(provider.name) ? '...' : (!isProviderDisabled(provider.name) ? 'Active' : 'Disabled')"></span>
+                        </button>
                     </div>
 
                     <div class="provider-status-meta">
