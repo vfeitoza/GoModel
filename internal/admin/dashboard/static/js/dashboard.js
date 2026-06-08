@@ -602,6 +602,9 @@ function dashboard() {
       if (typeof this.fetchAliases === "function") {
         requests.push(this.fetchAliases());
       }
+      if (typeof this.fetchProviderOverrides === "function") {
+        requests.push(this.fetchProviderOverrides());
+      }
       if (typeof this.fetchModelOverrides === "function") {
         requests.push(this.fetchModelOverrides());
       }
