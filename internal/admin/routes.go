@@ -66,6 +66,10 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/provider-overrides/:name", h.GetProviderOverride)
 	g.DELETE("/provider-overrides/:name", h.DeleteProviderOverride)
 
+	g.GET("/fallback/rules", h.GetFallbackRules)
+	g.PUT("/fallback/rules", h.UpsertFallbackRule)
+	g.DELETE("/fallback/rules/:sourceModel", h.DeleteFallbackRule)
+
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)
 	g.PUT("/guardrails", h.UpsertGuardrail)

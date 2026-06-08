@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/config"
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
@@ -30,6 +31,7 @@ import (
 
 // Handler serves admin API endpoints.
 type Handler struct {
+	cfg                 *config.Config
 	usageReader         usage.UsageReader
 	usageRecalculator   usage.PricingRecalculator
 	auditReader         auditlog.Reader
@@ -152,6 +154,13 @@ type RuntimeRefreshReport struct {
 // RuntimeRefresher refreshes application runtime snapshots on demand.
 type RuntimeRefresher interface {
 	RefreshRuntime(ctx context.Context) (RuntimeRefreshReport, error)
+}
+
+// WithConfig sets the application config for the handler.
+func WithConfig(cfg *config.Config) Option {
+	return func(h *Handler) {
+		h.cfg = cfg
+	}
 }
 
 // WithAuditReader enables audit log read endpoints.

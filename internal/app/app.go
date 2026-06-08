@@ -476,6 +476,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
 		adminHandler, dashHandler, adminErr := initAdmin(
+			appCfg,
 			auditResult.Storage,
 			usageResult.Storage,
 			providerResult.Registry,
@@ -928,6 +929,7 @@ func (a *App) logStartupInfo() {
 // initAdmin creates the admin API handler and optionally the dashboard handler.
 // Returns nil dashboard handler if uiEnabled is false.
 func initAdmin(
+	cfg *config.Config,
 	auditStorage, usageStorage storage.Storage,
 	registry *providers.ModelRegistry,
 	configuredProviders []providers.SanitizedProviderConfig,
@@ -987,6 +989,7 @@ func initAdmin(
 	adminHandler := admin.NewHandler(
 		reader,
 		registry,
+		admin.WithConfig(cfg),
 		admin.WithConfiguredProviders(configuredProviders),
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
 		admin.WithPricingResolver(pricingOverrideService),

@@ -36,6 +36,10 @@
             <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
             <span>API Keys</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/fallback"}}" class="nav-item" :class="{ active: page === 'fallback' }" title="Fallback" @click.prevent="navigate('fallback')">
+            <i data-lucide="git-fork" class="nav-icon" aria-hidden="true"></i>
+            <span>Fallback</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/workflows"}}" class="nav-item" :class="{ active: page === 'workflows' }" title="Workflows" @click.prevent="navigate('workflows')">
             <i data-lucide="workflow" class="nav-icon" aria-hidden="true"></i>
             <span>Workflows</span>

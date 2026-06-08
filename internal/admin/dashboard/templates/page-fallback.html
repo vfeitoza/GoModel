@@ -1,0 +1,565 @@
+{{define "page-fallback"}}
+<div class="page-fallback">
+  <div class="page-header">
+    <h1>Fallback Rules</h1>
+    <p class="page-description">
+      Configure model fallback chains. When a source model fails or is unavailable,
+      requests will automatically fall back to the configured models in order.
+    </p>
+  </div>
+
+  <div class="fallback-actions">
+    <button
+      type="button"
+      class="btn btn-primary"
+      @click="startNewRule"
+      x-show="!editingRule"
+    >
+      <span class="icon">+</span>
+      Add Fallback Rule
+    </button>
+  </div>
+
+  <!-- Edit/Create Form -->
+  <div class="fallback-editor" x-show="editingRule" x-cloak>
+    <div class="editor-header">
+      <h2 x-text="editingRule?.source_model ? 'Edit Fallback Rule' : 'New Fallback Rule'"></h2>
+      <button type="button" class="btn-close" @click="cancelEdit">&times;</button>
+    </div>
+
+    <div class="editor-body">
+      <div class="form-group">
+        <label for="source-model">Source Model</label>
+        <input
+          type="text"
+          id="source-model"
+          class="form-control"
+          x-model="newSourceModel"
+          placeholder="e.g., gpt-4o or openai/gpt-4o"
+          :disabled="editingRule?.source_model && editingRule.source_model !== ''"
+        />
+        <p class="form-help">
+          The model that will trigger fallback when it fails or is unavailable.
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label>Fallback Models (in priority order)</label>
+
+        <!-- Selected models list with drag-and-drop -->
+        <div class="selected-models">
+          <template x-if="selectedModels.length === 0">
+            <div class="empty-state">
+              <p>No fallback models selected. Add models from the list below.</p>
+            </div>
+          </template>
+
+          <template x-if="selectedModels.length > 0">
+            <div class="models-list">
+              <template x-for="(model, index) in selectedModels" :key="model">
+                <div
+                  class="model-item"
+                  draggable="true"
+                  @dragstart="dragStart(index)"
+                  @dragover="dragOver($event, index)"
+                  @dragend="dragEnd"
+                  :class="{ 'dragging': draggedIndex === index }"
+                >
+                  <span class="drag-handle">⋮⋮</span>
+                  <span class="model-priority" x-text="index + 1"></span>
+                  <span class="model-name" x-text="model"></span>
+                  <button
+                    type="button"
+                    class="btn-remove"
+                    @click="removeModel(index)"
+                    title="Remove"
+                  >
+                    &times;
+                  </button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+
+        <!-- Available models selector -->
+        <div class="model-selector">
+          <input
+            type="text"
+            class="form-control"
+            x-model="searchTerm"
+            placeholder="Search models..."
+          />
+
+          <div class="models-dropdown">
+            <template x-for="model in filteredAvailableModels" :key="model.id">
+              <div
+                class="dropdown-item"
+                @click="addModel(model.id)"
+                :class="{ 'disabled': selectedModels.includes(model.id) }"
+              >
+                <span class="model-provider" x-text="model.provider"></span>
+                <span class="model-id" x-text="model.display"></span>
+              </div>
+            </template>
+
+            <template x-if="filteredAvailableModels.length === 0">
+              <div class="dropdown-empty">
+                <p x-text="searchTerm ? 'No models found' : 'No models available'"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="editor-footer">
+      <button
+        type="button"
+        class="btn btn-secondary"
+        @click="cancelEdit"
+        :disabled="isSaving"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary"
+        @click="saveRule"
+        :disabled="isSaving || !newSourceModel.trim() || selectedModels.length === 0"
+      >
+        <span x-show="!isSaving">Save Rule</span>
+        <span x-show="isSaving">Saving...</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Rules List -->
+  <div class="fallback-rules-list" x-show="!editingRule">
+    <template x-if="rules.length === 0">
+      <div class="empty-state">
+        <p>No fallback rules configured yet.</p>
+        <p class="empty-help">
+          Add a fallback rule to automatically redirect requests when a model fails.
+        </p>
+      </div>
+    </template>
+
+    <template x-if="rules.length > 0">
+      <div class="rules-grid">
+        <template x-for="rule in rules" :key="rule.source_model">
+          <div class="rule-card">
+            <div class="rule-header">
+              <h3 x-text="rule.source_model"></h3>
+              <div class="rule-actions">
+                <button
+                  type="button"
+                  class="btn-icon"
+                  @click="editRule(rule)"
+                  title="Edit"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  class="btn-icon"
+                  @click="deleteRule(rule.source_model)"
+                  :disabled="isDeleting[rule.source_model]"
+                  title="Delete"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+
+            <div class="rule-body">
+              <p class="fallback-label">Fallback chain:</p>
+              <ol class="fallback-chain">
+                <template x-for="(model, index) in rule.fallback_models" :key="index">
+                  <li x-text="model"></li>
+                </template>
+              </ol>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+</div>
+
+<style>
+.page-fallback {
+  padding: 2rem;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.page-description {
+  color: #666;
+  margin: 0;
+}
+
+.fallback-actions {
+  margin-bottom: 2rem;
+}
+
+/* Editor */
+.fallback-editor {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.editor-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+  padding: 0;
+}
+
+.btn-close:hover {
+  color: #333;
+}
+
+.editor-body {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.form-control {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.form-control:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.form-help {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+/* Selected models */
+.selected-models {
+  margin-bottom: 1rem;
+  min-height: 100px;
+  border: 2px dashed #d0d0d0;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.model-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  cursor: move;
+  transition: all 0.2s;
+}
+
+.model-item:hover {
+  background: #f0f0f0;
+  border-color: #c0c0c0;
+}
+
+.model-item.dragging {
+  opacity: 0.5;
+}
+
+.drag-handle {
+  color: #999;
+  cursor: grab;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.model-priority {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #4a90e2;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.model-name {
+  flex: 1;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.btn-remove {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.btn-remove:hover {
+  color: #e74c3c;
+}
+
+/* Model selector */
+.model-selector {
+  position: relative;
+}
+
+.models-dropdown {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  margin-top: 0.5rem;
+  background: white;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dropdown-item:hover:not(.disabled) {
+  background: #f9f9f9;
+}
+
+.dropdown-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-provider {
+  padding: 0.25rem 0.5rem;
+  background: #e8f4f8;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.model-id {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.875rem;
+}
+
+.dropdown-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #999;
+}
+
+/* Editor footer */
+.editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Rules list */
+.empty-state {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #666;
+}
+
+.empty-help {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #999;
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.rule-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+
+.rule-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: #f9f9f9;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.rule-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+.rule-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.25rem;
+  padding: 0.25rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.btn-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.rule-body {
+  padding: 1.5rem;
+}
+
+.fallback-label {
+  margin: 0 0 0.75rem 0;
+  font-weight: 500;
+  color: #666;
+}
+
+.fallback-chain {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style: decimal;
+}
+
+.fallback-chain li {
+  padding: 0.5rem 0;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.fallback-chain li:not(:last-child) {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.625rem 1.25rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #4a90e2;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #357abd;
+}
+
+.btn-primary:disabled {
+  background: #a0c4e8;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.btn .icon {
+  margin-right: 0.5rem;
+}
+
+[x-cloak] {
+  display: none !important;
+}
+</style>
+{{end}}

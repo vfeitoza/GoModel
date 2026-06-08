@@ -1117,6 +1117,12 @@ function dashboard() {
       "dashboardAuthKeysModule",
     ),
     resolveModuleFactory(
+      typeof dashboardFallbackModule === "function"
+        ? dashboardFallbackModule
+        : null,
+      "dashboardFallbackModule",
+    ),
+    resolveModuleFactory(
       typeof dashboardGuardrailsModule === "function"
         ? dashboardGuardrailsModule
         : null,
