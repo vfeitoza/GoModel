@@ -5143,6 +5143,9 @@ const docTemplate = `{
                 "reasoning": {
                     "$ref": "#/definitions/core.Reasoning"
                 },
+                "service_tier": {
+                    "type": "string"
+                },
                 "stream": {
                     "type": "boolean"
                 },
@@ -5161,6 +5164,12 @@ const docTemplate = `{
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "top_p": {
+                    "type": "number"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },
@@ -5274,10 +5283,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        }
+                        "type": "object"
                     }
                 },
                 "metadata": {
@@ -5305,6 +5311,9 @@ const docTemplate = `{
         },
         "core.ConversationUpdateRequest": {
             "type": "object",
+            "required": [
+                "metadata"
+            ],
             "properties": {
                 "metadata": {
                     "type": "object",
@@ -5817,7 +5826,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "effort": {
-                    "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", and \"high\".",
+                    "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
                     "type": "string"
                 }
             }
@@ -5825,11 +5834,32 @@ const docTemplate = `{
         "core.ResponseCompactRequest": {
             "type": "object",
             "properties": {
+                "context_management": {},
+                "conversation": {
+                    "description": "Conversation accepts either a conversation ID string or an object with id.",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "$ref": "#/definitions/core.ResponsesConversationRef"
+                        }
+                    ]
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "input": {
                     "description": "string or []ResponsesInputElement — see docs for array form"
                 },
                 "instructions": {
                     "type": "string"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
                 },
                 "metadata": {
                     "type": "object",
@@ -5840,12 +5870,57 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "parallel_tool_calls": {
+                    "type": "boolean"
+                },
+                "previous_response_id": {
+                    "type": "string"
+                },
+                "prompt": {},
+                "prompt_cache_retention": {
+                    "type": "string"
+                },
                 "provider": {
                     "description": "Gateway routing hint; stripped before upstream execution.",
                     "type": "string"
                 },
                 "reasoning": {
                     "$ref": "#/definitions/core.Reasoning"
+                },
+                "safety_identifier": {
+                    "type": "string"
+                },
+                "service_tier": {
+                    "type": "string"
+                },
+                "store": {
+                    "type": "boolean"
+                },
+                "temperature": {
+                    "type": "number"
+                },
+                "text": {},
+                "tool_choice": {
+                    "description": "string or object"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "top_logprobs": {
+                    "type": "integer"
+                },
+                "top_p": {
+                    "type": "number"
+                },
+                "truncation": {
+                    "type": "string"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },
@@ -5924,11 +5999,32 @@ const docTemplate = `{
         "core.ResponseInputTokensRequest": {
             "type": "object",
             "properties": {
+                "context_management": {},
+                "conversation": {
+                    "description": "Conversation accepts either a conversation ID string or an object with id.",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "$ref": "#/definitions/core.ResponsesConversationRef"
+                        }
+                    ]
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "input": {
                     "description": "string or []ResponsesInputElement — see docs for array form"
                 },
                 "instructions": {
                     "type": "string"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
                 },
                 "metadata": {
                     "type": "object",
@@ -5939,12 +6035,57 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "parallel_tool_calls": {
+                    "type": "boolean"
+                },
+                "previous_response_id": {
+                    "type": "string"
+                },
+                "prompt": {},
+                "prompt_cache_retention": {
+                    "type": "string"
+                },
                 "provider": {
                     "description": "Gateway routing hint; stripped before upstream execution.",
                     "type": "string"
                 },
                 "reasoning": {
                     "$ref": "#/definitions/core.Reasoning"
+                },
+                "safety_identifier": {
+                    "type": "string"
+                },
+                "service_tier": {
+                    "type": "string"
+                },
+                "store": {
+                    "type": "boolean"
+                },
+                "temperature": {
+                    "type": "number"
+                },
+                "text": {},
+                "tool_choice": {
+                    "description": "string or object"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "top_logprobs": {
+                    "type": "integer"
+                },
+                "top_p": {
+                    "type": "number"
+                },
+                "truncation": {
+                    "type": "string"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },
@@ -6005,6 +6146,17 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ResponsesConversationRef": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "id"
+            ]
+        },
         "core.ResponsesError": {
             "type": "object",
             "properties": {
@@ -6052,6 +6204,24 @@ const docTemplate = `{
         "core.ResponsesRequest": {
             "type": "object",
             "properties": {
+                "context_management": {},
+                "conversation": {
+                    "description": "Conversation accepts either a conversation ID string or an object with id.",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "$ref": "#/definitions/core.ResponsesConversationRef"
+                        }
+                    ]
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "input": {
                     "description": "string or []ResponsesInputElement — see docs for array form"
                 },
@@ -6073,12 +6243,28 @@ const docTemplate = `{
                 "parallel_tool_calls": {
                     "type": "boolean"
                 },
+                "previous_response_id": {
+                    "type": "string"
+                },
+                "prompt": {},
+                "prompt_cache_retention": {
+                    "type": "string"
+                },
                 "provider": {
                     "description": "Gateway routing hint; stripped before upstream execution.",
                     "type": "string"
                 },
                 "reasoning": {
                     "$ref": "#/definitions/core.Reasoning"
+                },
+                "safety_identifier": {
+                    "type": "string"
+                },
+                "service_tier": {
+                    "type": "string"
+                },
+                "store": {
+                    "type": "boolean"
                 },
                 "stream": {
                     "type": "boolean"
@@ -6089,6 +6275,7 @@ const docTemplate = `{
                 "temperature": {
                     "type": "number"
                 },
+                "text": {},
                 "tool_choice": {
                     "description": "string or object"
                 },
@@ -6098,6 +6285,18 @@ const docTemplate = `{
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "top_logprobs": {
+                    "type": "integer"
+                },
+                "top_p": {
+                    "type": "number"
+                },
+                "truncation": {
+                    "type": "string"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },

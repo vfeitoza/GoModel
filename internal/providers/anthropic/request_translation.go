@@ -288,11 +288,15 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	if req == nil {
 		return nil, core.NewInvalidRequestError("anthropic chat request is required", nil)
 	}
+	if err := validateAnthropicUnsupportedChatExtras(req.ExtraFields); err != nil {
+		return nil, err
+	}
 
 	anthropicReq := &anthropicRequest{
 		Model:         req.Model,
 		Messages:      make([]anthropicMessage, 0, len(req.Messages)),
 		Temperature:   req.Temperature,
+		TopP:          resolveAnthropicTopP(req),
 		Stream:        req.Stream,
 		StopSequences: stopSequencesFromExtra(req.ExtraFields),
 	}
@@ -351,6 +355,31 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 
 	return anthropicReq, nil
+}
+
+func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
+	for _, field := range []string{"response_format", "verbosity"} {
+		raw := bytes.TrimSpace(extra.Lookup(field))
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			continue
+		}
+		if field == "response_format" && isNoopResponseFormat(raw) {
+			continue
+		}
+		return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
+	}
+	return nil
+}
+
+func isNoopResponseFormat(raw json.RawMessage) bool {
+	var responseFormat struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &responseFormat); err != nil {
+		return false
+	}
+	responseFormatType := strings.TrimSpace(responseFormat.Type)
+	return responseFormatType == "" || responseFormatType == "text"
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by
@@ -532,6 +561,22 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
 	return core.CloneRawJSON(trimmed), nil
+}
+
+func resolveAnthropicTopP(req *core.ChatRequest) *float64 {
+	if req.TopP != nil {
+		return req.TopP
+	}
+
+	raw := bytes.TrimSpace(req.ExtraFields.Lookup("top_p"))
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var topP float64
+	if err := json.Unmarshal(raw, &topP); err != nil {
+		return nil
+	}
+	return &topP
 }
 
 // stopSequencesFromExtra maps the OpenAI-compatible stop field (a string or an

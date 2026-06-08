@@ -61,6 +61,7 @@
                             "advanced/config-yaml",
                             "advanced/resilience",
                             "advanced/responses-api",
+                            "advanced/responses-compatibility",
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
                             "advanced/audio-api",
@@ -87,6 +88,7 @@
                 "tab": "Guides",
                 "icon": "compass",
                 "pages": [
+                    "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/claude-code",
                     "guides/codex",

@@ -1342,6 +1342,141 @@ func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value json.RawMessage
+	}{
+		{
+			name:  "response format",
+			field: "response_format",
+			value: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer"}}`),
+		},
+		{
+			name:  "verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`"low"`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					tt.field: tt.value,
+				}),
+			})
+			if err == nil {
+				t.Fatal("expected invalid request error, got nil")
+			}
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("error = %T, want *core.GatewayError", err)
+			}
+			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+				t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+			}
+			if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+				t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+			}
+			if !strings.Contains(gatewayErr.Message, tt.field) {
+				t.Fatalf("error message = %q, want mention %q", gatewayErr.Message, tt.field)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value json.RawMessage
+	}{
+		{
+			name:  "null response format",
+			field: "response_format",
+			value: json.RawMessage(`null`),
+		},
+		{
+			name:  "text response format",
+			field: "response_format",
+			value: json.RawMessage(`{"type":"text"}`),
+		},
+		{
+			name:  "null verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`null`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					tt.field: tt.value,
+				}),
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_PreservesTopP(t *testing.T) {
+	topP := 0.2
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		TopP:     &topP,
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.TopP == nil || *result.TopP != 0.2 {
+		t.Fatalf("TopP = %#v, want 0.2", result.TopP)
+	}
+}
+
+func TestConvertToAnthropicRequest_TopPFromExtraFields(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"top_p": json.RawMessage("0.3"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.TopP == nil || *result.TopP != 0.3 {
+		t.Fatalf("TopP = %#v, want 0.3", result.TopP)
+	}
+}
+
+func TestConvertToAnthropicRequest_TypedTopPWinsOverExtraFields(t *testing.T) {
+	topP := 0.2
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		TopP:     &topP,
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"top_p": json.RawMessage("0.9"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.TopP == nil || *result.TopP != 0.2 {
+		t.Fatalf("TopP = %#v, want typed value 0.2", result.TopP)
+	}
+}
+
 func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2865,6 +3000,7 @@ func TestResponsesWithContext(t *testing.T) {
 
 func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 	temp := 0.7
+	topP := 0.2
 	maxTokens := 1024
 
 	tests := []struct {
@@ -2912,11 +3048,15 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				Model:           "claude-sonnet-4-5-20250929",
 				Input:           "Hello",
 				Temperature:     &temp,
+				TopP:            &topP,
 				MaxOutputTokens: &maxTokens,
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
 				if req.Temperature == nil || *req.Temperature != 0.7 {
 					t.Errorf("Temperature = %v, want 0.7", req.Temperature)
+				}
+				if req.TopP == nil || *req.TopP != 0.2 {
+					t.Errorf("TopP = %v, want 0.2", req.TopP)
 				}
 				if req.MaxTokens != 1024 {
 					t.Errorf("MaxTokens = %d, want 1024", req.MaxTokens)

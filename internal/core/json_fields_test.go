@@ -85,6 +85,111 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 	}
 }
 
+func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
+	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"keep":     json.RawMessage(`1`),
+		"override": json.RawMessage(`"old"`),
+	})
+
+	merged, err := MergeUnknownJSONFields(base, map[string]json.RawMessage{
+		"override": json.RawMessage(`"new"`),
+		"added":    json.RawMessage(`true`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	if got := merged.Lookup("keep"); !bytes.Equal(got, []byte(`1`)) {
+		t.Fatalf("keep = %q, want 1", got)
+	}
+	if got := merged.Lookup("override"); !bytes.Equal(got, []byte(`"new"`)) {
+		t.Fatalf("override = %q, want \"new\"", got)
+	}
+	if got := merged.Lookup("added"); !bytes.Equal(got, []byte(`true`)) {
+		t.Fatalf("added = %q, want true", got)
+	}
+}
+
+func TestMergeUnknownJSONFields_PreservesRawBaseMembers(t *testing.T) {
+	base := UnknownJSONFields{
+		raw: json.RawMessage(`{"keep":{"b":2,"a":1},"dup":"first","dup":"second","override":"old"}`),
+	}
+
+	merged, err := MergeUnknownJSONFields(base, map[string]json.RawMessage{
+		"override": json.RawMessage(`"new"`),
+		"added":    json.RawMessage(`true`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	if bytes.Count(merged.raw, []byte(`"dup"`)) != 2 {
+		t.Fatalf("merged raw = %s, want duplicate dup keys preserved", merged.raw)
+	}
+	if bytes.Contains(merged.raw, []byte(`"override":"old"`)) {
+		t.Fatalf("merged raw = %s, old override value should be removed", merged.raw)
+	}
+	if got := merged.Lookup("dup"); !bytes.Equal(got, []byte(`"first"`)) {
+		t.Fatalf("dup = %s, want first duplicate value", got)
+	}
+	if got := merged.Lookup("override"); !bytes.Equal(got, []byte(`"new"`)) {
+		t.Fatalf("override = %s, want new value", got)
+	}
+	if got := merged.Lookup("added"); !bytes.Equal(got, []byte(`true`)) {
+		t.Fatalf("added = %s, want true", got)
+	}
+}
+
+func TestMergeUnknownJSONFields_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      UnknownJSONFields
+		additions map[string]json.RawMessage
+	}{
+		{
+			name: "malformed base raw",
+			base: UnknownJSONFields{raw: json.RawMessage(`{"keep":`)},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`true`),
+			},
+		},
+		{
+			name: "non object base raw",
+			base: UnknownJSONFields{raw: json.RawMessage(`[1,2,3]`)},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`true`),
+			},
+		},
+		{
+			name: "malformed addition raw",
+			base: UnknownJSONFields{},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`{`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := MergeUnknownJSONFields(tt.base, tt.additions); err == nil {
+				t.Fatal("MergeUnknownJSONFields() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestMergeUnknownJSONFields_NoAdditionsReturnsBase(t *testing.T) {
+	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{"a": json.RawMessage(`1`)})
+
+	merged, err := MergeUnknownJSONFields(base, nil)
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+	if !bytes.Equal(merged.Lookup("a"), []byte(`1`)) {
+		t.Fatalf("a = %q, want 1", merged.Lookup("a"))
+	}
+}
+
 func TestExtractUnknownJSONFields_RejectsInvalidJSONSyntax(t *testing.T) {
 	tests := []struct {
 		name string

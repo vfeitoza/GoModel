@@ -388,6 +388,256 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T) {
+	topP := 0.8
+	req := &core.ResponsesRequest{
+		Model:       "test-model",
+		Input:       "Hello",
+		TopP:        &topP,
+		Text:        map[string]any{"format": map[string]any{"type": "text"}},
+		User:        "tenant-123",
+		ServiceTier: "flex",
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if chatReq.TopP == nil || *chatReq.TopP != 0.8 {
+		t.Fatalf("TopP = %#v, want 0.8", chatReq.TopP)
+	}
+	if chatReq.User != "tenant-123" {
+		t.Fatalf("User = %q, want tenant-123", chatReq.User)
+	}
+	if chatReq.ServiceTier != "flex" {
+		t.Fatalf("ServiceTier = %q, want flex", chatReq.ServiceTier)
+	}
+}
+
+func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *core.ResponsesRequest
+		want string
+	}{
+		{
+			name: "tool_choice none alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "none"}},
+			want: "none",
+		},
+		{
+			name: "tool_choice auto alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "auto"}},
+			want: "auto",
+		},
+		{
+			name: "tool_choice required alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "required"}},
+			want: "required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(tt.req)
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if chatReq.ToolChoice != tt.want {
+				t.Fatalf("ToolChoice = %#v, want %q", chatReq.ToolChoice, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *core.ResponsesRequest
+		want string
+	}{
+		{
+			name: "previous response id",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", PreviousResponseID: "resp_123"},
+			want: "previous_response_id",
+		},
+		{
+			name: "conversation",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Conversation: &core.ResponsesConversationRef{ID: "conv_123"}},
+			want: "conversation",
+		},
+		{
+			name: "unknown text format type",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "grammar"}}},
+			want: "text",
+		},
+		{
+			name: "hosted web search tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "web_search_preview"},
+				},
+			},
+			want: "web_search_preview",
+		},
+		{
+			name: "hosted file search tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "file_search", "vector_store_ids": []string{"vs_123"}},
+				},
+			},
+			want: "file_search",
+		},
+		{
+			name: "hosted computer use tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "computer_use_preview", "display_width": 1024, "display_height": 768},
+				},
+			},
+			want: "computer_use_preview",
+		},
+		{
+			name: "hosted file search tool choice",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				ToolChoice: map[string]any{"type": "file_search"},
+			},
+			want: "file_search",
+		},
+		{
+			name: "hosted web search tool choice",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				ToolChoice: map[string]any{"type": "web_search_preview"},
+			},
+			want: "web_search_preview",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertResponsesRequestToChat(tt.req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing.T) {
+	t.Run("json_schema nests schema fields", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text: map[string]any{
+				"format": map[string]any{
+					"type":   "json_schema",
+					"name":   "weather",
+					"strict": true,
+					"schema": map[string]any{"type": "object"},
+				},
+				"verbosity": "low",
+			},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+
+		raw := chatReq.ExtraFields.Lookup("response_format")
+		if raw == nil {
+			t.Fatal("response_format missing from chat request extras")
+		}
+		var responseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name   string         `json:"name"`
+				Strict bool           `json:"strict"`
+				Schema map[string]any `json:"schema"`
+			} `json:"json_schema"`
+		}
+		if err := json.Unmarshal(raw, &responseFormat); err != nil {
+			t.Fatalf("json.Unmarshal(response_format) error = %v", err)
+		}
+		if responseFormat.Type != "json_schema" {
+			t.Fatalf("response_format.type = %q, want json_schema", responseFormat.Type)
+		}
+		if responseFormat.JSONSchema.Name != "weather" || !responseFormat.JSONSchema.Strict {
+			t.Fatalf("response_format.json_schema = %#v, want nested name/strict", responseFormat.JSONSchema)
+		}
+		if responseFormat.JSONSchema.Schema["type"] != "object" {
+			t.Fatalf("response_format.json_schema.schema = %#v, want nested schema", responseFormat.JSONSchema.Schema)
+		}
+		if verbosity := chatReq.ExtraFields.Lookup("verbosity"); string(verbosity) != `"low"` {
+			t.Fatalf("verbosity = %s, want \"low\"", verbosity)
+		}
+	})
+
+	t.Run("json_object passes through", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text:  map[string]any{"format": map[string]any{"type": "json_object"}},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+		if got := string(chatReq.ExtraFields.Lookup("response_format")); got != `{"type":"json_object"}` {
+			t.Fatalf("response_format = %s, want json_object", got)
+		}
+	})
+
+	t.Run("plain text produces no response_format", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text:  map[string]any{"format": map[string]any{"type": "text"}},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+		if raw := chatReq.ExtraFields.Lookup("response_format"); raw != nil {
+			t.Fatalf("response_format = %s, want none for plain text", raw)
+		}
+	})
+}
+
+func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T) {
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"test-model",
+		"input":[{"type":"reasoning","id":"rs_123","summary":[]}]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	_, err := ConvertResponsesRequestToChat(&req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `unsupported input item type "reasoning"`) {
+		t.Fatalf("error = %v, want unsupported reasoning item", err)
+	}
+}
+
 func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFields(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",

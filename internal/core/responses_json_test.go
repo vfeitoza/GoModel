@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -96,6 +97,91 @@ func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T
 	if req.ParallelToolCalls == nil || *req.ParallelToolCalls {
 		t.Fatalf("ParallelToolCalls = %#v, want false", req.ParallelToolCalls)
 	}
+}
+
+func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		raw  string
+		want string
+	}{
+		{
+			name: "string shape",
+			id:   "conv_new",
+			raw:  `"conv_old"`,
+			want: `"conv_new"`,
+		},
+		{
+			name: "object shape",
+			id:   "conv_new",
+			raw:  `{"id":"conv_old","metadata":{"team":"alpha"}}`,
+			want: `{"id":"conv_new","metadata":{"team":"alpha"}}`,
+		},
+		{
+			name: "clear string shape",
+			raw:  `"conv_old"`,
+			want: `null`,
+		},
+		{
+			name: "clear object shape",
+			raw:  `{"id":"conv_old","metadata":{"team":"alpha"}}`,
+			want: `null`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ref ResponsesConversationRef
+			if err := json.Unmarshal([]byte(tt.raw), &ref); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			ref.ID = tt.id
+
+			body, err := json.Marshal(ref)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if !jsonEqual(body, []byte(tt.want)) {
+				t.Fatalf("body = %s, want JSON equivalent to %s", body, tt.want)
+			}
+		})
+	}
+}
+
+func TestResponsesConversationRefMarshalJSON_InvalidRaw(t *testing.T) {
+	ref := ResponsesConversationRef{
+		ID:  "conv_new",
+		Raw: json.RawMessage(`{"id":`),
+	}
+
+	if _, err := json.Marshal(ref); err == nil {
+		t.Fatal("json.Marshal() error = nil, want invalid raw conversation error")
+	}
+}
+
+func jsonEqual(a, b []byte) bool {
+	var av any
+	if err := json.Unmarshal(a, &av); err != nil {
+		return false
+	}
+	var bv any
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return false
+	}
+	return jsonValueEqual(av, bv)
+}
+
+func jsonValueEqual(a, b any) bool {
+	ab, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ab, bb)
 }
 
 func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
@@ -223,6 +309,145 @@ func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
 				}
 			default:
 				t.Fatalf("unexpected request type %T", tt.req)
+			}
+		})
+	}
+}
+
+func TestResponseUtilityRequestJSON_PreservesResponsesContextFields(t *testing.T) {
+	store := false
+	parallelToolCalls := true
+	temperature := 0.2
+	topP := 0.8
+	topLogprobs := 3
+	maxOutputTokens := 256
+	utilityRequests := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "input tokens",
+			req: ResponseInputTokensRequest{
+				Model:                "gpt-5-mini",
+				Input:                "hello",
+				Instructions:         "be brief",
+				Tools:                []map[string]any{{"type": "function", "name": "lookup"}},
+				ToolChoice:           "auto",
+				ParallelToolCalls:    &parallelToolCalls,
+				Temperature:          &temperature,
+				TopP:                 &topP,
+				TopLogprobs:          &topLogprobs,
+				MaxOutputTokens:      &maxOutputTokens,
+				Metadata:             map[string]string{"team": "alpha"},
+				Reasoning:            &Reasoning{Effort: "low"},
+				Text:                 map[string]any{"format": map[string]any{"type": "text"}},
+				Include:              []string{"reasoning.encrypted_content"},
+				Truncation:           "auto",
+				Store:                &store,
+				PreviousResponseID:   "resp_previous",
+				Conversation:         &ResponsesConversationRef{ID: "conv_123"},
+				Prompt:               map[string]any{"id": "pmpt_123"},
+				PromptCacheRetention: "24h",
+				ContextManagement:    map[string]any{"truncation": "auto"},
+				User:                 "tenant-123",
+				ServiceTier:          "flex",
+				SafetyIdentifier:     "safe_123",
+				ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"future_field": json.RawMessage(`{"enabled":true}`),
+				}),
+			},
+		},
+		{
+			name: "compact",
+			req: ResponseCompactRequest{
+				Model:                "gpt-5-mini",
+				Input:                "hello",
+				Instructions:         "be brief",
+				Tools:                []map[string]any{{"type": "function", "name": "lookup"}},
+				ToolChoice:           "auto",
+				ParallelToolCalls:    &parallelToolCalls,
+				Temperature:          &temperature,
+				TopP:                 &topP,
+				TopLogprobs:          &topLogprobs,
+				MaxOutputTokens:      &maxOutputTokens,
+				Metadata:             map[string]string{"team": "alpha"},
+				Reasoning:            &Reasoning{Effort: "low"},
+				Text:                 map[string]any{"format": map[string]any{"type": "text"}},
+				Include:              []string{"reasoning.encrypted_content"},
+				Truncation:           "auto",
+				Store:                &store,
+				PreviousResponseID:   "resp_previous",
+				Conversation:         &ResponsesConversationRef{ID: "conv_123"},
+				Prompt:               map[string]any{"id": "pmpt_123"},
+				PromptCacheRetention: "24h",
+				ContextManagement:    map[string]any{"truncation": "auto"},
+				User:                 "tenant-123",
+				ServiceTier:          "flex",
+				SafetyIdentifier:     "safe_123",
+				ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"future_field": json.RawMessage(`{"enabled":true}`),
+				}),
+			},
+		},
+	}
+
+	for _, tt := range utilityRequests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.req)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			for _, field := range []string{
+				"tools",
+				"tool_choice",
+				"parallel_tool_calls",
+				"temperature",
+				"top_p",
+				"top_logprobs",
+				"max_output_tokens",
+				"metadata",
+				"reasoning",
+				"text",
+				"include",
+				"truncation",
+				"store",
+				"previous_response_id",
+				"conversation",
+				"prompt",
+				"prompt_cache_retention",
+				"context_management",
+				"user",
+				"service_tier",
+				"safety_identifier",
+				"future_field",
+			} {
+				if _, ok := decoded[field]; !ok {
+					t.Fatalf("decoded utility request missing %q: %s", field, string(body))
+				}
+			}
+
+			switch tt.req.(type) {
+			case ResponseInputTokensRequest:
+				var roundTripped ResponseInputTokensRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseInputTokensRequest) error = %v", err)
+				}
+				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
+					t.Fatalf("round-tripped input token request lost context fields: %+v", roundTripped)
+				}
+			case ResponseCompactRequest:
+				var roundTripped ResponseCompactRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseCompactRequest) error = %v", err)
+				}
+				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
+					t.Fatalf("round-tripped compact request lost context fields: %+v", roundTripped)
+				}
 			}
 		})
 	}
@@ -362,6 +587,126 @@ func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-5-mini",
+		"input":[
+			{
+				"type":"reasoning",
+				"id":"rs_123",
+				"summary":[{"type":"summary_text","text":"Checked the facts."}]
+			}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 1 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", req.Input)
+	}
+	if input[0].Type != "reasoning" {
+		t.Fatalf("Input[0].Type = %q, want reasoning", input[0].Type)
+	}
+	if len(input[0].Raw) == 0 {
+		t.Fatal("Input[0].Raw missing for unknown input item")
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
+	}
+	items := decoded["input"].([]any)
+	item := items[0].(map[string]any)
+	if item["type"] != "reasoning" || item["id"] != "rs_123" {
+		t.Fatalf("round-tripped item = %#v, want reasoning item", item)
+	}
+	if _, ok := item["summary"].([]any); !ok {
+		t.Fatalf("round-tripped summary = %#v, want array", item["summary"])
+	}
+	if _, ok := item["role"]; ok {
+		t.Fatalf("unknown item gained role field: %#v", item)
+	}
+	if _, ok := item["content"]; ok {
+		t.Fatalf("unknown item gained content field: %#v", item)
+	}
+}
+
+func TestResponsesInputElementJSON_UnknownItemRoundTripHasNoDuplicateKeys(t *testing.T) {
+	var elem ResponsesInputElement
+	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	// A decode→encode round trip must not duplicate the fields preserved in Raw.
+	for _, key := range []string{`"type"`, `"id"`, `"summary"`} {
+		if got := bytes.Count(body, []byte(key)); got != 1 {
+			t.Fatalf("key %s appears %d times in %s, want 1", key, got, body)
+		}
+	}
+}
+
+func TestResponsesInputElementUnmarshalJSON_ResetsReceiver(t *testing.T) {
+	var elem ResponsesInputElement
+	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":"hi","x_trace":"old"}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal(message) error = %v", err)
+	}
+	if elem.Role != "user" || elem.Content == nil || elem.ExtraFields.Lookup("x_trace") == nil {
+		t.Fatalf("initial element = %+v, want populated message", elem)
+	}
+
+	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal(reasoning) error = %v", err)
+	}
+	if elem.Type != "reasoning" {
+		t.Fatalf("Type = %q, want reasoning", elem.Type)
+	}
+	if elem.Role != "" || elem.Content != nil || !elem.ExtraFields.IsEmpty() {
+		t.Fatalf("stale typed fields remained after unknown item decode: %+v", elem)
+	}
+	if len(elem.Raw) == 0 {
+		t.Fatal("Raw missing for unknown item")
+	}
+}
+
+func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.T) {
+	elem := ResponsesInputElement{
+		Type: "reasoning",
+		Raw:  json.RawMessage(`{"type":"reasoning","id":"rs_123","summary":[]}`),
+		ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"provider_data": json.RawMessage(`{"trace_id":"trace-1"}`),
+		}),
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if decoded["type"] != "reasoning" || decoded["id"] != "rs_123" {
+		t.Fatalf("decoded item = %#v, want original raw reasoning item", decoded)
+	}
+	providerData, ok := decoded["provider_data"].(map[string]any)
+	if !ok || providerData["trace_id"] != "trace-1" {
+		t.Fatalf("provider_data = %#v, want merged trace id", decoded["provider_data"])
+	}
+}
+
 func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
@@ -415,11 +760,24 @@ func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T
 	}
 }
 
-func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
+func TestResponsesRequestJSON_PreservesAgentsSDKFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
 		"model":"gpt-5-mini",
 		"input":"hello",
+		"previous_response_id":"resp_previous",
+		"conversation":"conv_123",
+		"include":["reasoning.encrypted_content"],
+		"top_p":0.8,
+		"top_logprobs":3,
+		"truncation":"auto",
+		"store":false,
+		"prompt":{"id":"pmpt_123"},
+		"prompt_cache_retention":"24h",
+		"context_management":{"truncation":"auto"},
+		"user":"tenant-123",
+		"service_tier":"flex",
+		"safety_identifier":"safe_123",
 		"text":{
 			"format":{
 				"type":"json_schema",
@@ -430,8 +788,20 @@ func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields.Lookup("text") == nil {
-		t.Fatal("text missing from ExtraFields")
+	if req.PreviousResponseID != "resp_previous" {
+		t.Fatalf("PreviousResponseID = %q, want resp_previous", req.PreviousResponseID)
+	}
+	if req.Store == nil || *req.Store {
+		t.Fatalf("Store = %#v, want false", req.Store)
+	}
+	if req.TopP == nil || *req.TopP != 0.8 {
+		t.Fatalf("TopP = %#v, want 0.8", req.TopP)
+	}
+	if req.TopLogprobs == nil || *req.TopLogprobs != 3 {
+		t.Fatalf("TopLogprobs = %#v, want 3", req.TopLogprobs)
+	}
+	if req.Text == nil {
+		t.Fatal("Text missing")
 	}
 
 	body, err := json.Marshal(req)
@@ -454,6 +824,50 @@ func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 	}
 	if formatField["type"] != "json_schema" {
 		t.Fatalf("decoded text.format.type = %#v, want json_schema", formatField["type"])
+	}
+	if decoded["store"] != false {
+		t.Fatalf("decoded store = %#v, want false", decoded["store"])
+	}
+	if decoded["previous_response_id"] != "resp_previous" {
+		t.Fatalf("decoded previous_response_id = %#v, want resp_previous", decoded["previous_response_id"])
+	}
+	if decoded["conversation"] != "conv_123" {
+		t.Fatalf("decoded conversation = %#v, want conv_123", decoded["conversation"])
+	}
+	if decoded["service_tier"] != "flex" {
+		t.Fatalf("decoded service_tier = %#v, want flex", decoded["service_tier"])
+	}
+}
+
+func TestResponsesRequestJSON_PreservesConversationObjectShape(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-5-mini",
+		"input":"hello",
+		"conversation":{"id":"conv_123","metadata":{"team":"alpha"}}
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if req.Conversation == nil || req.Conversation.ID != "conv_123" {
+		t.Fatalf("Conversation = %+v, want id conv_123", req.Conversation)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
+	}
+	conversation, ok := decoded["conversation"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded conversation = %#v, want object", decoded["conversation"])
+	}
+	metadata, ok := conversation["metadata"].(map[string]any)
+	if !ok || metadata["team"] != "alpha" {
+		t.Fatalf("decoded conversation metadata = %#v, want team alpha", conversation["metadata"])
 	}
 }
 

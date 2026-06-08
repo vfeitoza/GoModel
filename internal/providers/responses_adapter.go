@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"strings"
@@ -24,6 +26,9 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
+	if err := validateResponsesRequestForChatTranslation(req); err != nil {
+		return nil, err
+	}
 
 	chatReq := &core.ChatRequest{
 		Model:             req.Model,
@@ -33,14 +38,25 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		ToolChoice:        normalizeResponsesToolChoiceForChat(req.ToolChoice),
 		ParallelToolCalls: req.ParallelToolCalls,
 		Temperature:       req.Temperature,
+		TopP:              req.TopP,
 		Stream:            req.Stream,
 		StreamOptions:     cloneStreamOptions(req.StreamOptions),
 		Reasoning:         req.Reasoning,
+		User:              req.User,
+		ServiceTier:       req.ServiceTier,
 		ExtraFields:       core.CloneUnknownJSONFields(req.ExtraFields),
 	}
 
 	if req.MaxOutputTokens != nil {
 		chatReq.MaxTokens = req.MaxOutputTokens
+	}
+
+	textFields, err := responsesTextToChatExtraFields(req.Text)
+	if err != nil {
+		return nil, err
+	}
+	if chatReq.ExtraFields, err = core.MergeUnknownJSONFields(chatReq.ExtraFields, textFields); err != nil {
+		return nil, err
 	}
 
 	if req.Instructions != "" {
@@ -57,6 +73,165 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	chatReq.Messages = append(chatReq.Messages, messages...)
 
 	return chatReq, nil
+}
+
+func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) error {
+	if strings.TrimSpace(req.PreviousResponseID) != "" {
+		return unsupportedResponsesChatTranslationField("previous_response_id")
+	}
+	if req.Conversation != nil {
+		return unsupportedResponsesChatTranslationField("conversation")
+	}
+	if len(req.Include) > 0 {
+		return unsupportedResponsesChatTranslationField("include")
+	}
+	if req.Prompt != nil {
+		return unsupportedResponsesChatTranslationField("prompt")
+	}
+	if strings.TrimSpace(req.Truncation) != "" {
+		return unsupportedResponsesChatTranslationField("truncation")
+	}
+	if strings.TrimSpace(req.PromptCacheRetention) != "" {
+		return unsupportedResponsesChatTranslationField("prompt_cache_retention")
+	}
+	if req.ContextManagement != nil {
+		return unsupportedResponsesChatTranslationField("context_management")
+	}
+	if req.TopLogprobs != nil {
+		return unsupportedResponsesChatTranslationField("top_logprobs")
+	}
+	if strings.TrimSpace(req.SafetyIdentifier) != "" {
+		return unsupportedResponsesChatTranslationField("safety_identifier")
+	}
+	if err := validateResponsesToolsForChatTranslation(req.Tools); err != nil {
+		return err
+	}
+	if err := validateResponsesToolChoiceForChatTranslation(req.ToolChoice); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateResponsesToolsForChatTranslation(tools []map[string]any) error {
+	for _, tool := range tools {
+		toolType, _ := tool["type"].(string)
+		if strings.TrimSpace(toolType) != "function" {
+			return unsupportedResponsesChatTranslationTool(toolType)
+		}
+	}
+	return nil
+}
+
+func validateResponsesToolChoiceForChatTranslation(choice any) error {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	choiceType, _ := choiceMap["type"].(string)
+	switch strings.TrimSpace(choiceType) {
+	case "function", "auto", "required", "none":
+		return nil
+	default:
+		return unsupportedResponsesChatTranslationTool(choiceType)
+	}
+}
+
+// responsesTextToChatExtraFields maps the Responses "text" settings onto the
+// equivalent Chat Completions fields. text.format becomes response_format and
+// text.verbosity passes through unchanged; both are emitted as passthrough
+// members so existing provider handling (e.g. Gemini response_format) applies.
+// Plain text output produces no fields. Anything that cannot be translated
+// faithfully (an unknown format type or text option) returns an error rather
+// than silently dropping the caller's intent.
+func responsesTextToChatExtraFields(text any) (map[string]json.RawMessage, error) {
+	if text == nil {
+		return nil, nil
+	}
+	textMap, ok := text.(map[string]any)
+	if !ok {
+		return nil, unsupportedResponsesChatTranslationField("text")
+	}
+
+	additions := make(map[string]json.RawMessage)
+	for key, value := range textMap {
+		switch key {
+		case "format":
+			responseFormat, err := responsesTextFormatToChatResponseFormat(value)
+			if err != nil {
+				return nil, err
+			}
+			if responseFormat != nil {
+				additions["response_format"] = responseFormat
+			}
+		case "verbosity":
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			additions["verbosity"] = raw
+		default:
+			return nil, unsupportedResponsesChatTranslationField("text")
+		}
+	}
+	if len(additions) == 0 {
+		return nil, nil
+	}
+	return additions, nil
+}
+
+// responsesTextFormatToChatResponseFormat converts a Responses text.format into
+// a Chat Completions response_format. Plain text yields nil (chat default). The
+// Responses API places json_schema fields directly on the format object, while
+// Chat nests them under a json_schema member.
+func responsesTextFormatToChatResponseFormat(format any) (json.RawMessage, error) {
+	if format == nil {
+		return nil, nil
+	}
+	formatMap, ok := format.(map[string]any)
+	if !ok {
+		return nil, unsupportedResponsesChatTranslationField("text")
+	}
+
+	formatType, _ := formatMap["type"].(string)
+	switch strings.TrimSpace(formatType) {
+	case "", "text":
+		return nil, nil
+	case "json_object":
+		return json.Marshal(map[string]any{"type": "json_object"})
+	case "json_schema":
+		jsonSchema := make(map[string]any, len(formatMap))
+		for k, v := range formatMap {
+			if k == "type" {
+				continue
+			}
+			jsonSchema[k] = v
+		}
+		return json.Marshal(map[string]any{
+			"type":        "json_schema",
+			"json_schema": jsonSchema,
+		})
+	default:
+		return nil, unsupportedResponsesChatTranslationField("text")
+	}
+}
+
+func unsupportedResponsesChatTranslationField(field string) error {
+	return core.NewInvalidRequestError(
+		fmt.Sprintf("responses field %q is only supported by native Responses providers; use an OpenAI-compatible provider or passthrough for this request", field),
+		nil,
+	)
+}
+
+func unsupportedResponsesChatTranslationTool(toolType string) error {
+	toolType = strings.TrimSpace(toolType)
+	if toolType == "" {
+		toolType = "unknown"
+	}
+	return core.NewInvalidRequestError(
+		fmt.Sprintf("responses tool type %q is only supported by native Responses providers; chat-translated providers only support function tools", toolType),
+		nil,
+	)
 }
 
 func cloneStreamOptions(src *core.StreamOptions) *core.StreamOptions {
@@ -115,7 +290,12 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	}
 
 	choiceType, _ := choiceMap["type"].(string)
-	if strings.TrimSpace(choiceType) != "function" {
+	switch choiceType := strings.TrimSpace(choiceType); choiceType {
+	case "auto", "required", "none":
+		return choiceType
+	case "function":
+		// Function choices stay object-shaped, with legacy name-form normalized below.
+	default:
 		return choice
 	}
 	if _, ok := choiceMap["function"].(map[string]any); ok {
