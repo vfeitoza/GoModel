@@ -67,7 +67,6 @@ func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "unsupported role", body: `{"model":"m","max_tokens":10,"messages":[{"role":"system","content":"hi"}]}`},
 		{name: "typo role", body: `{"model":"m","max_tokens":10,"messages":[{"role":"assisstant","content":"hi"}]}`},
 		{name: "malformed system", body: `{"model":"m","max_tokens":10,"system":42,"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "non-text system block", body: `{"model":"m","max_tokens":10,"system":[{"type":"image"}],"messages":[{"role":"user","content":"hi"}]}`},
@@ -114,6 +113,71 @@ func TestToChatRequestBasic(t *testing.T) {
 	}
 	if chat.Messages[0].Role != "system" || chat.Messages[0].Content != "be brief" {
 		t.Errorf("system message = %+v", chat.Messages[0])
+	}
+	if chat.Messages[1].Role != "user" || chat.Messages[1].Content != "hello" {
+		t.Errorf("user message = %+v", chat.Messages[1])
+	}
+}
+
+func TestToChatRequestSystemMessageInMessages(t *testing.T) {
+	// System messages in the messages array should be extracted and prepended to the system prompt
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"system","content":"system prompt"},
+			{"role":"user","content":"hello"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if len(chat.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2 (system + user)", len(chat.Messages))
+	}
+	if chat.Messages[0].Role != "system" {
+		t.Errorf("first message role = %q, want system", chat.Messages[0].Role)
+	}
+	systemContent, ok := chat.Messages[0].Content.(string)
+	if !ok {
+		t.Fatalf("system content is not a string: %T", chat.Messages[0].Content)
+	}
+	if systemContent != "system prompt" {
+		t.Errorf("system content = %q, want system prompt", systemContent)
+	}
+	if chat.Messages[1].Role != "user" || chat.Messages[1].Content != "hello" {
+		t.Errorf("user message = %+v", chat.Messages[1])
+	}
+}
+
+func TestToChatRequestSystemMessageCombined(t *testing.T) {
+	// System messages in messages array should be combined with top-level system field
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"system":"top-level system",
+		"messages":[
+			{"role":"system","content":"message system"},
+			{"role":"user","content":"hello"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if len(chat.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2 (system + user)", len(chat.Messages))
+	}
+	// System messages should be combined with top-level system
+	if chat.Messages[0].Role != "system" {
+		t.Errorf("first message role = %q, want system", chat.Messages[0].Role)
+	}
+	systemContent, ok := chat.Messages[0].Content.(string)
+	if !ok {
+		t.Fatalf("system content is not a string: %T", chat.Messages[0].Content)
+	}
+	if !strings.Contains(systemContent, "top-level system") {
+		t.Errorf("system message should contain top-level system, got: %s", systemContent)
+	}
+	if !strings.Contains(systemContent, "message system") {
+		t.Errorf("system message should contain message system, got: %s", systemContent)
 	}
 	if chat.Messages[1].Role != "user" || chat.Messages[1].Content != "hello" {
 		t.Errorf("user message = %+v", chat.Messages[1])
