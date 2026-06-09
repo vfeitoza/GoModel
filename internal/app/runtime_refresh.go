@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"gomodel/config"
 	"gomodel/internal/admin"
 	"gomodel/internal/core"
+	"gomodel/internal/fallback"
 	"gomodel/internal/providers"
 )
 
@@ -136,6 +138,21 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 		return report, err
 	}
 	if err := a.runRefreshableServiceStep(&report, "workflows", a.workflowService(), ctx); err != nil {
+		return report, err
+	}
+
+	if err := a.runRuntimeRefreshStep(&report, "fallback", func() runtimeRefreshStepResult {
+		if a == nil || a.config == nil {
+			return runtimeRefreshStepResult{
+				status:  admin.RuntimeRefreshStatusSkipped,
+				message: "config is not available",
+			}
+		}
+		if err := a.refreshFallbackConfig(ctx); err != nil {
+			return runtimeRefreshStepResult{err: err}
+		}
+		return runtimeRefreshStepResult{message: "fallback configuration reloaded"}
+	}); err != nil {
 		return report, err
 	}
 
@@ -329,4 +346,32 @@ func (a *App) workflowService() refreshableService {
 		return nil
 	}
 	return a.workflows.Service
+}
+
+func (a *App) refreshFallbackConfig(ctx context.Context) error {
+	if a == nil || a.config == nil || a.server == nil {
+		return nil
+	}
+
+	// Reload the fallback config from file
+	fallbackCfg := a.config.Fallback
+	if err := config.ReloadFallbackManualRules(&fallbackCfg); err != nil {
+		return fmt.Errorf("failed to reload fallback config: %w", err)
+	}
+
+	// Update the config
+	a.config.Fallback = fallbackCfg
+
+	// Recreate the fallback resolver
+	registry := a.modelRegistry()
+	if registry == nil {
+		return fmt.Errorf("model registry is not available")
+	}
+
+	newResolver := fallback.NewResolver(fallbackCfg, registry)
+
+	// Update the server's fallback resolver
+	a.server.UpdateFallbackResolver(newResolver)
+
+	return nil
 }

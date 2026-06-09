@@ -611,6 +611,9 @@ function dashboard() {
       if (typeof this.fetchModelPricingOverrides === "function") {
         requests.push(this.fetchModelPricingOverrides());
       }
+      if (typeof this.fetchRules === "function") {
+        requests.push(this.fetchRules());
+      }
       if (typeof this.fetchWorkflowsPage === "function") {
         requests.push(this.fetchWorkflowsPage());
       }

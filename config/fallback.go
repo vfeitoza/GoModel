@@ -188,3 +188,48 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	cfg.Manual = manual
 	return nil
 }
+
+// ReloadFallbackManualRules reloads only the manual rules from the JSON file,
+// keeping other fallback config settings unchanged.
+func ReloadFallbackManualRules(cfg *FallbackConfig) error {
+	if cfg == nil {
+		return nil
+	}
+
+	path := strings.TrimSpace(cfg.ManualRulesPath)
+	if path == "" {
+		cfg.Manual = nil
+		return nil
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read %q: %w", path, err)
+	}
+
+	expanded := expandString(string(raw))
+	decoded := make(map[string][]string)
+	if err := json.Unmarshal([]byte(expanded), &decoded); err != nil {
+		return fmt.Errorf("failed to parse %q: %w", path, err)
+	}
+
+	manual := make(map[string][]string, len(decoded))
+	for key, models := range decoded {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		normalized := make([]string, 0, len(models))
+		for _, model := range models {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			normalized = append(normalized, model)
+		}
+		manual[key] = normalized
+	}
+	cfg.Manual = manual
+	return nil
+}
+

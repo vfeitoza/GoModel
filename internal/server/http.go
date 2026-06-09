@@ -391,6 +391,14 @@ func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {
 	return *cfg.AllowPassthroughV1Alias
 }
 
+// UpdateFallbackResolver updates the fallback resolver used by the handler.
+// This is called when the fallback configuration is reloaded at runtime.
+func (s *Server) UpdateFallbackResolver(resolver RequestFallbackResolver) {
+	if s != nil && s.handler != nil {
+		s.handler.fallbackResolver = resolver
+	}
+}
+
 // Start starts the HTTP server on the given address and exits when ctx is canceled.
 func (s *Server) Start(ctx context.Context, addr string) error {
 	return newGatewayStartConfig(addr).Start(ctx, s.echo)

@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -206,6 +207,10 @@ func (h *Handler) fallbackManualRulesPath() string {
 
 // writeFallbackRules writes the fallback rules map to the specified path as formatted JSON.
 func (h *Handler) writeFallbackRules(path string, rulesMap map[string][]string) error {
+	// Get absolute path for logging
+	absPath, _ := filepath.Abs(path)
+	slog.Info("writing fallback rules", "path", path, "absolute_path", absPath)
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
