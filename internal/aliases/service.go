@@ -94,7 +94,7 @@ func (s *Service) ListViews() []View {
 			view.ProviderType = strings.TrimSpace(s.catalog.GetProviderType(view.ResolvedModel))
 			view.Valid = s.catalog.Supports(view.ResolvedModel)
 		}
-		view.HasUserPathRestriction = len(alias.UserPaths) > 0 && !(len(alias.UserPaths) == 1 && alias.UserPaths[0] == "/")
+		view.HasUserPathRestriction = len(alias.UserPaths) > 0 && (len(alias.UserPaths) != 1 || alias.UserPaths[0] != "/")
 		views = append(views, view)
 	}
 	return views
