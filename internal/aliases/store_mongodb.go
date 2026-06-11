@@ -15,8 +15,9 @@ type mongoAliasDocument struct {
 	Name           string    `bson:"_id"`
 	TargetModel    string    `bson:"target_model"`
 	TargetProvider string    `bson:"target_provider,omitempty"`
-	Description    string    `bson:"description,omitempty"`
+	Description string    `bson:"description,omitempty"`
 	Enabled        bool      `bson:"enabled"`
+	UserPaths      []string  `bson:"user_paths,omitempty"`
 	CreatedAt      time.Time `bson:"created_at"`
 	UpdatedAt      time.Time `bson:"updated_at"`
 }
@@ -100,6 +101,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, alias Alias) error {
 			"target_provider": alias.TargetProvider,
 			"description":     alias.Description,
 			"enabled":         alias.Enabled,
+			"user_paths":      alias.UserPaths,
 			"updated_at":      alias.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
@@ -135,6 +137,7 @@ func aliasFromMongo(doc mongoAliasDocument) Alias {
 		TargetProvider: doc.TargetProvider,
 		Description:    doc.Description,
 		Enabled:        doc.Enabled,
+		UserPaths:      doc.UserPaths,
 		CreatedAt:      doc.CreatedAt.UTC(),
 		UpdatedAt:      doc.UpdatedAt.UTC(),
 	}

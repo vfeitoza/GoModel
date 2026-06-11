@@ -97,6 +97,12 @@
                     <textarea id="alias-description" rows="3" placeholder="Optional description" x-model="aliasForm.description"></textarea>
                 </div>
 
+                <div class="form-field">
+                    <label class="form-field-label" for="alias-user-paths">User Paths (conditional)</label>
+                    <textarea id="alias-user-paths" rows="3" placeholder="/victor" x-model="aliasForm.user_paths"></textarea>
+                    <p class="form-hint">Leave empty for all users. One path per line. Use / for every user path.</p>
+                </div>
+
                 <p class="form-hint">
                     Aliases are not supported on pass-through endpoints.
                 </p>

@@ -1,6 +1,7 @@
 package aliases
 
 import (
+	"strings"
 	"time"
 
 	"gomodel/internal/core"
@@ -11,10 +12,32 @@ type Alias struct {
 	Name           string    `json:"name" bson:"name"`
 	TargetModel    string    `json:"target_model" bson:"target_model"`
 	TargetProvider string    `json:"target_provider,omitempty" bson:"target_provider,omitempty"`
-	Description    string    `json:"description,omitempty" bson:"description,omitempty"`
+	Description string    `json:"description,omitempty" bson:"description,omitempty"`
 	Enabled        bool      `json:"enabled" bson:"enabled"`
+	UserPaths      []string  `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
 	CreatedAt      time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" bson:"updated_at"`
+}
+
+// MatchesUserPath reports whether the given userPath is allowed to use this alias.
+// An empty or single-element list containing "/" matches all user paths.
+func (a Alias) MatchesUserPath(userPath string) bool {
+	if len(a.UserPaths) == 0 {
+		return true
+	}
+	for _, allowed := range a.UserPaths {
+		if allowed == "/" {
+			return true
+		}
+		if userPath == allowed {
+			return true
+		}
+		// Check if userPath is a descendant of allowed path
+		if strings.HasPrefix(userPath, allowed+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // TargetSelector returns the concrete selector this alias points to.
@@ -32,7 +55,8 @@ type Resolution struct {
 // View is the admin-facing representation of an alias with current validity status.
 type View struct {
 	Alias
-	ResolvedModel string `json:"resolved_model"`
-	ProviderType  string `json:"provider_type,omitempty"`
-	Valid         bool   `json:"valid"`
+	ResolvedModel            string `json:"resolved_model"`
+	ProviderType             string `json:"provider_type,omitempty"`
+	Valid                    bool   `json:"valid"`
+	HasUserPathRestriction   bool   `json:"has_user_path_restriction"`
 }

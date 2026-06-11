@@ -10,7 +10,7 @@ import (
 )
 
 type selectorResolver interface {
-	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 // BatchPreparer validates model access for native batch subrequests before provider submission.
@@ -40,7 +40,7 @@ func (p *BatchPreparer) PrepareBatchRequest(ctx context.Context, providerType st
 			if err != nil {
 				return nil, err
 			}
-			resolved, err := p.resolveSelector(requested)
+			resolved, err := p.resolveSelector(ctx, requested)
 			if err != nil {
 				return nil, err
 			}
@@ -81,12 +81,12 @@ func (p *BatchPreparer) batchFileTransport() core.BatchFileTransport {
 	return nil
 }
 
-func (p *BatchPreparer) resolveSelector(requested core.RequestedModelSelector) (core.ModelSelector, error) {
+func (p *BatchPreparer) resolveSelector(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, error) {
 	if p == nil || p.provider == nil {
 		return requested.Normalize()
 	}
 	if resolver, ok := p.provider.(selectorResolver); ok {
-		selector, _, err := resolver.ResolveModel(requested)
+		selector, _, err := resolver.ResolveModel(ctx, requested)
 		return selector, err
 	}
 	return requested.Normalize()

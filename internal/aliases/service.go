@@ -94,6 +94,7 @@ func (s *Service) ListViews() []View {
 			view.ProviderType = strings.TrimSpace(s.catalog.GetProviderType(view.ResolvedModel))
 			view.Valid = s.catalog.Supports(view.ResolvedModel)
 		}
+		view.HasUserPathRestriction = len(alias.UserPaths) > 0 && !(len(alias.UserPaths) == 1 && alias.UserPaths[0] == "/")
 		views = append(views, view)
 	}
 	return views
@@ -118,10 +119,10 @@ func (s *Service) Get(name string) (*Alias, bool) {
 
 // Resolve resolves raw model/provider inputs through the alias table.
 func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(core.NewRequestedModelSelector(model, provider))
+	return s.resolveRequested(core.NewRequestedModelSelector(model, provider), "")
 }
 
-func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resolution, bool, error) {
+func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPath string) (Resolution, bool, error) {
 	selector, err := requested.Normalize()
 	if err != nil {
 		return Resolution{}, false, err
@@ -131,7 +132,7 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resol
 		return Resolution{Requested: selector, Resolved: selector}, false, nil
 	}
 
-	if resolution, ok := s.resolveAlias(requested.Model); ok {
+	if resolution, ok := s.resolveAlias(requested.Model, userPath); ok {
 		return resolution, true, nil
 	}
 	return Resolution{Requested: selector, Resolved: selector}, false, nil
@@ -141,8 +142,18 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resol
 // chosen for execution. This allows alias policy to be consumed as an explicit
 // workflow resolution dependency without requiring the provider chain itself to
 // own alias behavior.
-func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested)
+func (s *Service) ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	return s.ResolveModelWithUserPath(ctx, requested, "")
+}
+
+// ResolveModelWithUserPath resolves a requested selector, honoring user_path
+// restrictions on aliases. If userPath is empty, all aliases are considered (same
+// as ResolveModel). The userPath is extracted from ctx if not explicitly provided.
+func (s *Service) ResolveModelWithUserPath(ctx context.Context, requested core.RequestedModelSelector, userPath string) (core.ModelSelector, bool, error) {
+	if userPath == "" {
+		userPath = core.UserPathFromContext(ctx)
+	}
+	resolution, changed, err := s.resolveRequested(requested, userPath)
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -173,13 +184,13 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 
 // Supports reports whether an alias currently resolves to a concrete model.
 func (s *Service) Supports(model string) bool {
-	_, ok := s.resolveAlias(model)
+	_, ok := s.resolveAlias(model, "")
 	return ok
 }
 
 // GetProviderType returns the resolved provider type for an alias, or empty if unresolved.
 func (s *Service) GetProviderType(model string) string {
-	if resolution, ok := s.resolveAlias(model); ok {
+	if resolution, ok := s.resolveAlias(model, ""); ok {
 		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
 	}
 	return ""
@@ -275,7 +286,7 @@ func (s *Service) validate(alias Alias) error {
 	return nil
 }
 
-func (s *Service) resolveAlias(name string) (Resolution, bool) {
+func (s *Service) resolveAlias(name string, userPath string) (Resolution, bool) {
 	name = normalizeName(name)
 	resolution := Resolution{
 		Requested: core.ModelSelector{Model: name},
@@ -287,6 +298,11 @@ func (s *Service) resolveAlias(name string) (Resolution, bool) {
 
 	alias, ok := s.Get(name)
 	if !ok || !alias.Enabled {
+		return resolution, false
+	}
+
+	// Check user_path restriction if userPath is provided
+	if userPath != "" && !alias.MatchesUserPath(userPath) {
 		return resolution, false
 	}
 

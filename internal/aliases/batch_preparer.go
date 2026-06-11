@@ -50,16 +50,16 @@ type aliasModelProviderTypeChecker interface {
 	GetProviderType(string) string
 }
 
-func resolveAliasModel(service *Service, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func resolveAliasModel(ctx context.Context, service *Service, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if service == nil {
 		selector, err := requested.Normalize()
 		return selector, false, err
 	}
-	return service.ResolveModel(requested)
+	return service.ResolveModelWithUserPath(ctx, requested, "")
 }
 
-func resolveAliasRequestSelector(service *Service, requested core.RequestedModelSelector) (core.ModelSelector, error) {
-	selector, changed, err := resolveAliasModel(service, requested)
+func resolveAliasRequestSelector(ctx context.Context, service *Service, requested core.RequestedModelSelector) (core.ModelSelector, error) {
+	selector, changed, err := resolveAliasModel(ctx, service, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
@@ -69,8 +69,8 @@ func resolveAliasRequestSelector(service *Service, requested core.RequestedModel
 	return requested.Normalize()
 }
 
-func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChecker, requested core.RequestedModelSelector, expectedProviderType string) (core.ModelSelector, error) {
-	selector, err := resolveAliasRequestSelector(service, requested)
+func resolveAliasRoutableSelector(ctx context.Context, service *Service, checker aliasModelSupportChecker, requested core.RequestedModelSelector, expectedProviderType string) (core.ModelSelector, error) {
+	selector, err := resolveAliasRequestSelector(ctx, service, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
@@ -112,11 +112,25 @@ func validateResolvedProviderType(checker aliasModelSupportChecker, selector cor
 	)
 }
 
-func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
+func rewriteAliasChatRequest(ctx context.Context, service *Service, checker aliasModelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveAliasRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	if err != nil {
+		return nil, err
+	}
+	forward := *req
+	forward.Model = selector.Model
+	forward.Provider = providerValueForMode(selector, mode)
+	return&forward, nil
+}
+
+func rewriteAliasResponsesRequest(ctx context.Context, service *Service, checker aliasModelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	selector, err := resolveAliasRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -126,25 +140,11 @@ func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker,
 	return &forward, nil
 }
 
-func rewriteAliasResponsesRequest(service *Service, checker aliasModelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
+func rewriteAliasEmbeddingRequest(ctx context.Context, service *Service, checker aliasModelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
-	if err != nil {
-		return nil, err
-	}
-	forward := *req
-	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
-	return &forward, nil
-}
-
-func rewriteAliasEmbeddingRequest(service *Service, checker aliasModelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
-	if req == nil {
-		return nil, nil
-	}
-	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveAliasRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -168,10 +168,10 @@ func rewriteAliasBatchSource(
 		req,
 		fileTransport,
 		[]core.Operation{core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings},
-		func(_ context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
+		func(ctx context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
 			switch typed := decoded.Request.(type) {
 			case *core.ChatRequest:
-				modified, err := rewriteAliasChatRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteAliasChatRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
@@ -181,7 +181,7 @@ func rewriteAliasBatchSource(
 				}
 				return body, nil
 			case *core.ResponsesRequest:
-				modified, err := rewriteAliasResponsesRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteAliasResponsesRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
@@ -191,7 +191,7 @@ func rewriteAliasBatchSource(
 				}
 				return body, nil
 			case *core.EmbeddingRequest:
-				modified, err := rewriteAliasEmbeddingRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteAliasEmbeddingRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}

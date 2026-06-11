@@ -3,6 +3,7 @@ package aliases
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,6 +27,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			target_provider TEXT NOT NULL DEFAULT '',
 			description TEXT NOT NULL DEFAULT '',
 			enabled INTEGER NOT NULL DEFAULT 1,
+			user_paths TEXT NOT NULL DEFAULT '[]',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)
@@ -44,7 +46,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]Alias, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT name, target_model, target_provider, description, enabled, created_at, updated_at
+		SELECT name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at
 		FROM aliases
 		ORDER BY name ASC
 	`)
@@ -61,7 +63,7 @@ func (s *SQLiteStore) List(ctx context.Context) ([]Alias, error) {
 
 func (s *SQLiteStore) Get(ctx context.Context, name string) (*Alias, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT name, target_model, target_provider, description, enabled, created_at, updated_at
+		SELECT name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at
 		FROM aliases
 		WHERE name = ?
 	`, normalizeName(name))
@@ -87,15 +89,16 @@ func (s *SQLiteStore) Upsert(ctx context.Context, alias Alias) error {
 	alias.UpdatedAt = time.Unix(now, 0).UTC()
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO aliases (name, target_model, target_provider, description, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO aliases (name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			target_model = excluded.target_model,
 			target_provider = excluded.target_provider,
 			description = excluded.description,
 			enabled = excluded.enabled,
+			user_paths = excluded.user_paths,
 			updated_at = excluded.updated_at
-	`, alias.Name, alias.TargetModel, alias.TargetProvider, alias.Description, boolToSQLite(alias.Enabled), alias.CreatedAt.Unix(), alias.UpdatedAt.Unix())
+	`, alias.Name, alias.TargetModel, alias.TargetProvider, alias.Description, boolToSQLite(alias.Enabled), userPathsToJSON(alias.UserPaths), alias.CreatedAt.Unix(), alias.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert alias: %w", err)
 	}
@@ -126,12 +129,14 @@ func scanSQLiteAlias(scanner aliasScanner) (Alias, error) {
 	var enabled int
 	var createdAt int64
 	var updatedAt int64
+	var userPathsJSON string
 	if err := scanner.Scan(
 		&alias.Name,
 		&alias.TargetModel,
 		&alias.TargetProvider,
 		&alias.Description,
 		&enabled,
+		&userPathsJSON,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -140,7 +145,21 @@ func scanSQLiteAlias(scanner aliasScanner) (Alias, error) {
 	alias.Enabled = enabled != 0
 	alias.CreatedAt = time.Unix(createdAt, 0).UTC()
 	alias.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	if err := json.Unmarshal([]byte(userPathsJSON), &alias.UserPaths); err != nil {
+		alias.UserPaths = nil
+	}
 	return alias, nil
+}
+
+func userPathsToJSON(paths []string) string {
+	if len(paths) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 func boolToSQLite(v bool) int {

@@ -50,15 +50,15 @@ func NewProviderWithOptions(inner core.RoutableProvider, service *Service, optio
 }
 
 // ResolveModel resolves a requested selector through the alias table.
-func (p *Provider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	return resolveAliasModel(p.service, requested)
+func (p *Provider) ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	return resolveAliasModel(ctx, p.service, requested)
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.ChatCompletion(ctx, req)
 	}
-	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteAliasChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamChatCompletion(ctx, req)
 	}
-	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteAliasChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Responses(ctx, req)
 	}
-	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteAliasResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamResponses(ctx, req)
 	}
-	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteAliasResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Embeddings(ctx, req)
 	}
-	forward, err := rewriteAliasEmbeddingRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteAliasEmbeddingRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}

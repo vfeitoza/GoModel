@@ -2,6 +2,7 @@ package aliases
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -31,6 +32,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			target_provider TEXT NOT NULL DEFAULT '',
 			description TEXT NOT NULL DEFAULT '',
 			enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			user_paths JSONB NOT NULL DEFAULT '[]',
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL
 		)
@@ -49,7 +51,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]Alias, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT name, target_model, target_provider, description, enabled, created_at, updated_at
+		SELECT name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at
 		FROM aliases
 		ORDER BY name ASC
 	`)
@@ -66,7 +68,7 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]Alias, error) {
 
 func (s *PostgreSQLStore) Get(ctx context.Context, name string) (*Alias, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT name, target_model, target_provider, description, enabled, created_at, updated_at
+		SELECT name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at
 		FROM aliases
 		WHERE name = $1
 	`, normalizeName(name))
@@ -92,15 +94,16 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, alias Alias) error {
 	alias.UpdatedAt = time.Unix(now, 0).UTC()
 
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO aliases (name, target_model, target_provider, description, enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO aliases (name, target_model, target_provider, description, enabled, user_paths, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT(name) DO UPDATE SET
 			target_model = excluded.target_model,
 			target_provider = excluded.target_provider,
 			description = excluded.description,
 			enabled = excluded.enabled,
+			user_paths = excluded.user_paths,
 			updated_at = excluded.updated_at
-	`, alias.Name, alias.TargetModel, alias.TargetProvider, alias.Description, alias.Enabled, alias.CreatedAt.Unix(), alias.UpdatedAt.Unix())
+	`, alias.Name, alias.TargetModel, alias.TargetProvider, alias.Description, alias.Enabled, userPathsToJSON(alias.UserPaths), alias.CreatedAt.Unix(), alias.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert alias: %w", err)
 	}
@@ -126,12 +129,14 @@ func scanPostgreSQLAlias(scanner aliasScanner) (Alias, error) {
 	var alias Alias
 	var createdAt int64
 	var updatedAt int64
+	var userPathsJSON []byte
 	if err := scanner.Scan(
 		&alias.Name,
 		&alias.TargetModel,
 		&alias.TargetProvider,
 		&alias.Description,
 		&alias.Enabled,
+		&userPathsJSON,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -139,5 +144,8 @@ func scanPostgreSQLAlias(scanner aliasScanner) (Alias, error) {
 	}
 	alias.CreatedAt = time.Unix(createdAt, 0).UTC()
 	alias.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	if err := json.Unmarshal(userPathsJSON,&alias.UserPaths); err != nil {
+		alias.UserPaths = nil
+	}
 	return alias, nil
 }

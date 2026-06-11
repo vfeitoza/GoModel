@@ -20,7 +20,8 @@
                 name: '',
                 target_model: '',
                 description: '',
-                enabled: true
+                enabled: true,
+                user_paths: ''
             },
             modelOverrideFormOpen: false,
             modelOverrideSubmitting: false,
@@ -142,7 +143,8 @@
                     name: '',
                     target_model: '',
                     description: '',
-                    enabled: true
+                    enabled: true,
+                    user_paths: ''
                 };
             },
 
@@ -510,11 +512,13 @@
                 this.aliasFormOriginalName = alias.name || '';
                 this.aliasFormError = '';
                 this.aliasNotice = '';
+                const userPaths = Array.isArray(alias.user_paths) ? alias.user_paths.join('\n') : '';
                 this.aliasForm = {
                     name: alias.name || '',
                     target_model: alias.target_provider ? alias.target_provider + '/' + alias.target_model : (alias.target_model || ''),
                     description: alias.description || '',
-                    enabled: alias.enabled !== false
+                    enabled: alias.enabled !== false,
+                    user_paths: userPaths
                 };
                 this.focusEditorField('aliasEditor');
             },
@@ -700,11 +704,13 @@
                 this.aliasNotice = '';
                 this.aliasFormError = '';
 
+                const userPaths = Array.isArray(alias.user_paths) ? alias.user_paths : [];
                 const payload = {
                     name: alias.name,
                     target_model: alias.target_provider ? alias.target_provider + '/' + alias.target_model : alias.target_model,
                     description: String(alias.description || '').trim(),
-                    enabled: alias.enabled === false
+                    enabled: alias.enabled === false,
+                    user_paths: userPaths
                 };
 
                 try {
@@ -902,11 +908,14 @@
 
                 this.aliasSubmitting = true;
 
+                const userPaths = this.normalizeModelOverridePaths(this.aliasForm.user_paths);
+
                 const payload = {
                     name,
                     target_model: targetModel,
                     description: String(this.aliasForm.description || '').trim(),
-                    enabled: Boolean(this.aliasForm.enabled)
+                    enabled: Boolean(this.aliasForm.enabled),
+                    user_paths: userPaths
                 };
 
                 try {

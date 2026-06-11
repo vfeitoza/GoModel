@@ -142,7 +142,7 @@ func TestServiceResolveRefreshTargetDoesNotRequireCatalogSupport(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	selector, changed, err := service.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	selector, changed, err := service.ResolveModel(context.Background(), core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -289,7 +289,7 @@ func TestServiceResolveAliasWithExplicitProviderPreservesRequestedSelector(t *te
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	selector, changed, err := service.ResolveModel(core.NewRequestedModelSelector("smart", "openai"))
+	selector, changed, err := service.ResolveModel(context.Background(), core.NewRequestedModelSelector("smart", "openai"))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}

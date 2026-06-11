@@ -10,7 +10,7 @@ import (
 // ModelResolver resolves raw request selectors into concrete model selectors
 // before provider execution.
 type ModelResolver interface {
-	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 // FallbackResolver resolves alternate concrete model selectors for a translated

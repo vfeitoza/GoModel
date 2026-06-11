@@ -12,11 +12,12 @@ import (
 )
 
 type upsertAliasRequest struct {
-	Name           string `json:"name"`
-	TargetModel    string `json:"target_model"`
-	TargetProvider string `json:"target_provider,omitempty"`
-	Description    string `json:"description,omitempty"`
-	Enabled        *bool  `json:"enabled,omitempty"`
+	Name           string   `json:"name"`
+	TargetModel    string   `json:"target_model"`
+	TargetProvider string   `json:"target_provider,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	Enabled        *bool    `json:"enabled,omitempty"`
+	UserPaths      []string `json:"user_paths,omitempty"`
 }
 
 type deleteAliasRequest struct {
@@ -63,6 +64,7 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 		TargetProvider: req.TargetProvider,
 		Description:    req.Description,
 		Enabled:        enabled,
+		UserPaths:      req.UserPaths,
 	}); err != nil {
 		return handleError(c, aliasWriteError(err))
 	}

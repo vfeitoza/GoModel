@@ -164,7 +164,7 @@ func TestProviderResolvesRequestsAndExposesAliasModels(t *testing.T) {
 	if got := provider.GetProviderType("smart"); got != "openai" {
 		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
 	}
-	selector, changed, err := provider.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	selector, changed, err := provider.ResolveModel(context.Background(), core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -296,7 +296,7 @@ func TestProviderCanDisableTranslatedRequestRewriting(t *testing.T) {
 	if got := provider.GetProviderType("smart"); got != "openai" {
 		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
 	}
-	selector, changed, err := provider.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	selector, changed, err := provider.ResolveModel(context.Background(), core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}

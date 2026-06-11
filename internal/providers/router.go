@@ -67,7 +67,7 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 	if lookup == nil {
 		return nil, fmt.Errorf("lookup cannot be nil")
 	}
-	return &Router{
+	return&Router{
 		lookup: lookup,
 	}, nil
 }
@@ -89,7 +89,7 @@ func (r *Router) checkReady() error {
 //  2. provider type + model ID
 //  3. raw slash-shaped model ID (only when provider was not explicit)
 //  4. default normalization fallback
-func (r *Router) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (r *Router) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if err := r.checkReady(); err != nil {
 		return core.ModelSelector{}, false, registryUnavailableError(err)
 	}
@@ -241,7 +241,7 @@ func (r *Router) hasConfiguredProviderName(providerName string) bool {
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
 func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (core.Provider, core.ModelSelector, error) {
 	requested := core.NewRequestedModelSelector(model, providerHint)
-	selector, _, err := r.ResolveModel(requested)
+	selector, _, err := r.ResolveModel(context.Background(), requested)
 	refreshed := false
 	if err != nil {
 		var refreshErr error
@@ -252,7 +252,7 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 		if !refreshed {
 			return nil, core.ModelSelector{}, err
 		}
-		selector, _, err = r.ResolveModel(requested)
+		selector, _, err = r.ResolveModel(context.Background(), requested)
 		if err != nil {
 			return nil, core.ModelSelector{}, err
 		}
@@ -267,7 +267,7 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 			return nil, core.ModelSelector{}, refreshErr
 		}
 		if refreshed {
-			selector, _, err = r.ResolveModel(requested)
+			selector, _, err = r.ResolveModel(context.Background(), requested)
 			if err != nil {
 				return nil, core.ModelSelector{}, err
 			}
@@ -595,7 +595,7 @@ func callEmbeddings(ctx context.Context, provider core.Provider, req *core.Embed
 // Supports returns true if any provider supports the given model.
 // Returns false if the lookup has no models loaded.
 func (r *Router) Supports(model string) bool {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	selector, _, err := r.ResolveModel(context.Background(), core.NewRequestedModelSelector(model, ""))
 	if err != nil {
 		return false
 	}
@@ -764,7 +764,7 @@ func audioUnsupportedError(model string) error {
 // GetProviderType returns the provider type string for the given model.
 // Returns empty string if the model is not found.
 func (r *Router) GetProviderType(model string) string {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	selector, _, err := r.ResolveModel(context.Background(), core.NewRequestedModelSelector(model, ""))
 	if err != nil {
 		return ""
 	}
@@ -774,7 +774,7 @@ func (r *Router) GetProviderType(model string) string {
 // GetProviderName returns the concrete configured provider instance name for
 // the given model selector. Returns empty string when unavailable.
 func (r *Router) GetProviderName(model string) string {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	selector, _, err := r.ResolveModel(context.Background(), core.NewRequestedModelSelector(model, ""))
 	if err != nil {
 		return ""
 	}

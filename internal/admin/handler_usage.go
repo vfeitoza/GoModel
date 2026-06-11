@@ -393,7 +393,7 @@ func (h *Handler) recalculatePricingSelector(raw string) (provider, model string
 	}
 
 	if h.aliases != nil {
-		selector, changed, err := h.aliases.ResolveModel(core.NewRequestedModelSelector(raw, ""))
+		selector, changed, err := h.aliases.ResolveModel(context.Background(), core.NewRequestedModelSelector(raw, ""))
 		if err != nil {
 			return "", "", core.NewInvalidRequestError("invalid selector: "+err.Error(), err)
 		}
