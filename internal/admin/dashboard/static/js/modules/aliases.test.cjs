@@ -165,13 +165,15 @@ test('alias mutations send alias name in JSON body', async() => {
         target_model: 'gpt-4o',
         target_provider: 'openai',
         description: '',
-        enabled: true
+        enabled: true,
+        user_paths: []
     });
     module.aliasForm = {
         name: 'openai/smart',
         target_model: 'openai/gpt-4o',
         description: 'smart alias',
-        enabled: true
+        enabled: true,
+        user_paths: ''
     };
     module.aliasFormOriginalName = '';
     await module.submitAliasForm();
@@ -188,13 +190,15 @@ test('alias mutations send alias name in JSON body', async() => {
         name: 'openai/smart',
         target_model: 'openai/gpt-4o',
         description: '',
-        enabled: false
+        enabled: false,
+        user_paths: []
     });
     assert.deepEqual(JSON.parse(requests[1].request.body), {
         name: 'openai/smart',
         target_model: 'openai/gpt-4o',
         description: 'smart alias',
-        enabled: true
+        enabled: true,
+        user_paths: []
     });
     assert.deepEqual(JSON.parse(requests[2].request.body), {
         name: 'openai/smart'
