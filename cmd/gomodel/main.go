@@ -77,7 +77,7 @@ func startApplication(application lifecycleApp, addr string) error {
 
 // @title          GoModel API
 // @version        1.0
-// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.
+// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.
 // @BasePath       /
 // @schemes        http
 // @securityDefinitions.apikey BearerAuth
@@ -99,6 +99,14 @@ func main() {
 	if opts.Health {
 		if err := runHealthProbe(opts.HealthTimeout); err != nil {
 			fmt.Fprintf(os.Stderr, "health check failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if opts.Ready {
+		if err := runReadyProbe(opts.ReadyTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "readiness check failed: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
