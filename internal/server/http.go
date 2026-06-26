@@ -24,6 +24,7 @@ import (
 	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
+	"gomodel/internal/gateway"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -61,6 +62,7 @@ type Config struct {
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
 	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
 	FallbackResolver                RequestFallbackResolver                // Optional: translated-route fallback resolver
+	IntelligentRouter               gateway.IntelligentRouter              // Optional: intelligent model selector for translated routes
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
@@ -128,17 +130,20 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	var modelAuthorizer RequestModelAuthorizer
 	var workflowPolicyResolver RequestWorkflowPolicyResolver
 	var fallbackResolver RequestFallbackResolver
+	var intelligentRouter gateway.IntelligentRouter
 	var translatedRequestPatcher TranslatedRequestPatcher
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
 		modelAuthorizer = cfg.ModelAuthorizer
 		workflowPolicyResolver = cfg.WorkflowPolicyResolver
 		fallbackResolver = cfg.FallbackResolver
+		intelligentRouter = cfg.IntelligentRouter
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
 	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, fallbackResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
+	handler.intelligentRouter = intelligentRouter
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister

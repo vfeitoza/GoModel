@@ -1,0 +1,360 @@
+---
+title: "Intelligent Routing"
+description: "Let GoModel automatically select the best model for each request based on task classification, cost, quality, and latency strategies."
+icon: "route"
+keywords: ["intelligent routing", "auto", "model selection", "cost optimization", "auto-cost", "auto-quality"]
+---
+
+## Overview
+
+Intelligent routing lets you send requests with a virtual selector like `auto`
+instead of a concrete model name. GoModel classifies the request with a cheap
+analyzer model and picks the best concrete model from its catalog based on a
+configurable strategy.
+
+Use it when you want GoModel to:
+
+- Route simple tasks to cheaper models automatically.
+- Route complex or sensitive tasks to stronger models.
+- Optimize for cost, quality, or latency without changing application code.
+
+## How it works
+
+1. The client sends a request with `"model": "auto"` (or another intelligent selector).
+2. GoModel intercepts the request before provider resolution.
+3. A cheap **analyzer model** classifies the request: complexity, task type, required capabilities, and a confidence score.
+4. GoModel scores all eligible catalog models against the active strategy.
+5. In `enforce` mode, the winning model replaces the selector and the request is dispatched normally.
+6. In `observe` mode, the classification and recommendation are logged but the original request goes through unchanged.
+
+The selected model still passes through all normal authorization, workflow, and fallback rules.
+
+## Enable intelligent routing
+
+```yaml
+intelligent_routing:
+  enabled: true
+  mode: "enforce"
+```
+
+Intelligent routing is **disabled by default**. Set `enabled: true` and a
+`mode` other than `off` to activate it.
+
+### Modes
+
+| Mode      | Behavior |
+| --------- | -------- |
+| `off`     | Feature disabled. Intelligent selectors behave as unknown models and return `model_not_found`. |
+| `observe` | Classifies the request and logs the recommendation, but executes the original requested model unchanged. Useful for dry-run evaluation. |
+| `enforce` | Replaces the requested selector with the recommended model. The selected model is dispatched upstream. |
+
+Start with `observe` to validate analyzer accuracy and candidate coverage before
+switching to `enforce`.
+
+## Selectors
+
+Intelligent selectors are special model names that trigger classification. Send
+one of these in the `model` field:
+
+| Selector      | Default strategy | Description |
+| ------------- | ---------------- | ----------- |
+| `auto`        | `balanced`       | General-purpose. Balances cost and quality. |
+| `smart`       | `balanced`       | Alias for `auto`. Same behavior. |
+| `auto-cost`   | `cost`           | Prefers the cheapest eligible model. |
+| `auto-quality`| `quality`        | Prefers the highest-quality eligible model. |
+
+Example request:
+
+```bash
+curl -X POST https://your-gateway/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Summarize this paragraph."}]
+  }'
+```
+
+## Analyzers
+
+Analyzers are the cheap models GoModel uses to classify each incoming request.
+Configure an ordered pool; GoModel tries them in order and falls back to the
+next one on failure or timeout.
+
+```yaml
+intelligent_routing:
+  analyzers:
+    - model: "gpt-5.4-mini"
+      provider: "openai"
+      max_tokens: 256
+    - model: "glm-5-turbo"
+      provider: "zai"
+      max_tokens: 256
+    - model: "claude-haiku-4-5"
+      provider: "anthropic"
+      max_tokens: 256
+```
+
+| Field       | Description |
+| ----------- | ----------- |
+| `model`     | Model ID as known to the configured provider. |
+| `provider`  | Name of the provider entry in `config.yaml` (must point to an external API, not a self-referencing gateway URL). |
+| `max_tokens`| Maximum tokens the analyzer response may use. Defaults to `defaults.max_analysis_tokens` when omitted or `0`. |
+
+<Warning>
+  The provider configured for each analyzer must point to an external API, not
+  to the GoModel gateway itself. Using a provider whose `base_url` points back
+  to the running gateway causes a request loop and timeouts.
+</Warning>
+
+At least one analyzer is required when `enabled: true`.
+
+## Defaults
+
+```yaml
+intelligent_routing:
+  defaults:
+    strategy: "balanced"
+    max_analysis_tokens: 256
+    timeout: 8000000000
+    min_savings_ratio: 0.15
+    min_confidence: 0.7
+```
+
+| Field                | Default | Description |
+| -------------------- | ------- | ----------- |
+| `strategy`           | `balanced` | Default selection strategy when no per-selector override applies. Accepted values: `cost`, `balanced`, `quality`, `latency`. |
+| `max_analysis_tokens`| `256`   | Token budget for each analyzer call. Larger values allow more reasoning but increase analysis cost and latency. |
+| `timeout`            | `1500000000` (1.5s) | Per-analyzer call timeout in nanoseconds. Increase when analyzer providers have higher latency. |
+| `min_savings_ratio`  | `0.15`  | Minimum estimated cost savings (as a fraction) required to switch from the default to a cheaper candidate in `enforce` mode. Set to `0` to always prefer the cheapest model. |
+| `min_confidence`     | `0.7`   | Below this confidence score, GoModel prefers a stronger model instead of the cost-optimal one. Raise this value to be more conservative. |
+
+<Note>
+  The `timeout` field is a Go `time.Duration` stored as nanoseconds in YAML.
+  Use the `INTELLIGENT_ROUTING_TIMEOUT` environment variable for human-readable
+  duration strings such as `8s` or `1500ms`.
+</Note>
+
+## Selection strategies
+
+| Strategy   | Behavior |
+| ---------- | -------- |
+| `cost`     | Picks the cheapest eligible model that meets the task requirements. |
+| `balanced` | Balances cost and quality. Prefers a mid-tier model and upgrades when confidence is low or quality is required. |
+| `quality`  | Picks the highest-quality eligible model regardless of cost. |
+| `latency`  | Picks the model with the lowest expected latency. |
+
+The strategy influences how candidates are scored. All strategies still respect
+`min_confidence`: when the classification confidence falls below the threshold,
+GoModel selects a stronger model regardless of strategy.
+
+## Selectors configuration
+
+The `selectors` block maps selector names to fixed strategies:
+
+```yaml
+intelligent_routing:
+  selectors:
+    - name: "auto"
+      strategy: "balanced"
+    - name: "smart"
+      strategy: "balanced"
+    - name: "auto-cost"
+      strategy: "cost"
+    - name: "auto-quality"
+      strategy: "quality"
+```
+
+The built-in selector names and their default strategies are defined in the table
+above. This block is informational and reflects the hardcoded defaults; you do
+not need to set it explicitly.
+
+## Candidates
+
+By default, all models in the catalog are eligible candidates. Use `candidates`
+to restrict or exclude specific models:
+
+```yaml
+intelligent_routing:
+  candidates:
+    allow:
+      - "openai/gpt-4o-mini"
+      - "anthropic/claude-sonnet-*"
+    deny:
+      - "openai/o3"
+```
+
+| Field   | Description |
+| ------- | ----------- |
+| `allow` | When non-empty, only models matching at least one pattern are eligible. An empty list means all models are eligible. |
+| `deny`  | Models matching any pattern are excluded even if they match an `allow` pattern. |
+
+Patterns support a trailing `*` wildcard. The match is applied against the
+fully qualified model selector (`provider/model`).
+
+<Note>
+  Pattern matching uses the provider name as registered in GoModel (the key
+  under `providers:` in `config.yaml`), not the provider type. For example, if
+  you registered the provider as `openai_primary`, use `openai_primary/gpt-4o`
+  in patterns, not `openai/gpt-4o`.
+</Note>
+
+## Fallback model
+
+```yaml
+intelligent_routing:
+  fallback_model: "openai/gpt-4o-mini"
+```
+
+When all analyzers fail (network errors, timeouts, or empty responses), GoModel
+uses the `fallback_model` selector to dispatch the request. Leave empty to
+return `model_not_found` on total analyzer failure.
+
+In `enforce` mode, a non-empty `fallback_model` ensures the request always
+succeeds even if classification is unavailable. The decision log records
+`analysis_failed=true` so you can track failure rate.
+
+## Analysis user path
+
+```yaml
+intelligent_routing:
+  analysis_user_path: "/intelligent-router"
+```
+
+Every analyzer call is attributed to this user path in usage and audit records.
+This keeps classification cost separate from application request cost in usage
+reports and the admin dashboard.
+
+You can filter usage for the analyzer alone with:
+
+```bash
+GET /admin/usage?user_path=/intelligent-router
+```
+
+## Environment variables
+
+All top-level fields can also be set through environment variables:
+
+| Variable                                  | Config field                                   | Default |
+| ----------------------------------------- | ---------------------------------------------- | ------- |
+| `INTELLIGENT_ROUTING_ENABLED`             | `intelligent_routing.enabled`                  | `false` |
+| `INTELLIGENT_ROUTING_MODE`                | `intelligent_routing.mode`                     | `off`   |
+| `INTELLIGENT_ROUTING_TIMEOUT`             | `intelligent_routing.defaults.timeout`         | `1500ms` |
+| `INTELLIGENT_ROUTING_DEFAULT_STRATEGY`    | `intelligent_routing.defaults.strategy`        | `balanced` |
+| `INTELLIGENT_ROUTING_MAX_ANALYSIS_TOKENS` | `intelligent_routing.defaults.max_analysis_tokens` | `256` |
+| `INTELLIGENT_ROUTING_MIN_SAVINGS_RATIO`   | `intelligent_routing.defaults.min_savings_ratio` | `0.15` |
+| `INTELLIGENT_ROUTING_MIN_CONFIDENCE`      | `intelligent_routing.defaults.min_confidence`  | `0.7` |
+| `INTELLIGENT_ROUTING_FALLBACK_MODEL`      | `intelligent_routing.fallback_model`           | `""` |
+
+<Note>
+  `INTELLIGENT_ROUTING_TIMEOUT` accepts Go duration strings such as `8s` or
+  `1500ms`. The YAML field `timeout` stores the value as nanoseconds because
+  `time.Duration` is an integer type in Go's YAML decoder.
+</Note>
+
+## Observability
+
+### Logs
+
+Every classification produces a structured log entry at `INFO` level:
+
+```json
+{
+  "msg": "intelligent routing decision",
+  "requested": "auto",
+  "selected": "openai/gpt-4o-mini",
+  "applied": true,
+  "applied_model": "openai/gpt-4o-mini",
+  "analyzer": "openai/gpt-5.4-mini",
+  "strategy": "balanced",
+  "mode": "enforce",
+  "confidence": 0.91,
+  "analysis_failed": false,
+  "duration_ms": 312,
+  "reason": "complexity=simple task=qa tier=cheap confidence=0.91 -> openai/gpt-4o-mini"
+}
+```
+
+When the router substitutes a model, an additional `INFO` entry is emitted:
+
+```json
+{
+  "msg": "intelligent routing applied",
+  "from": "auto",
+  "to": "openai/gpt-4o-mini",
+  "analysis_failed": false,
+  "reason": "complexity=simple task=qa tier=cheap confidence=0.91 -> openai/gpt-4o-mini"
+}
+```
+
+Analyzer failures are logged at `WARN` level before the next analyzer is tried:
+
+```json
+{
+  "msg": "intelligent router analyzer failed; trying next",
+  "analyzer": "openai/gpt-5.4-mini",
+  "error": "context deadline exceeded"
+}
+```
+
+### Prometheus metrics
+
+When `METRICS_ENABLED=true`, intelligent routing exposes the following counters
+and histograms:
+
+| Metric | Type | Labels | Description |
+| ------ | ---- | ------ | ----------- |
+| `gomodel_intelligent_routing_requests_total` | Counter | `mode`, `strategy`, `applied`, `analysis_failed` | Total classification requests. |
+| `gomodel_intelligent_routing_decision_latency_seconds` | Histogram | `mode`, `strategy`, `analysis_failed` | Time spent in classification and scoring. |
+| `gomodel_intelligent_routing_fallbacks_total` | Counter | `mode`, `strategy` | Total requests that fell back due to analyzer failure. |
+| `gomodel_intelligent_routing_low_confidence_total` | Counter | `mode`, `strategy` | Total requests where confidence was below `min_confidence`. |
+
+## Minimal configuration example
+
+```yaml
+intelligent_routing:
+  enabled: true
+  mode: "enforce"
+  analyzers:
+    - model: "gpt-4o-mini"
+      provider: "openai"
+  fallback_model: "openai/gpt-4o-mini"
+```
+
+## Full configuration reference
+
+```yaml
+intelligent_routing:
+  enabled: false
+  mode: "off"              # off | observe | enforce
+  analyzers:
+    - model: "gpt-5.4-mini"
+      provider: "openai"
+      max_tokens: 256
+    - model: "glm-5-turbo"
+      provider: "zai"
+      max_tokens: 256
+    - model: "claude-haiku-4-5"
+      provider: "anthropic"
+      max_tokens: 256
+  defaults:
+    strategy: "balanced"   # cost | balanced | quality | latency
+    max_analysis_tokens: 256
+    timeout: 8000000000    # nanoseconds; use INTELLIGENT_ROUTING_TIMEOUT=8s env var for readability
+    min_savings_ratio: 0.15
+    min_confidence: 0.7
+  selectors:
+    - name: "auto"
+      strategy: "balanced"
+    - name: "smart"
+      strategy: "balanced"
+    - name: "auto-cost"
+      strategy: "cost"
+    - name: "auto-quality"
+      strategy: "quality"
+  candidates:
+    allow: []              # empty = all catalog models eligible
+    deny: []
+  fallback_model: "openai/gpt-4o-mini"
+  analysis_user_path: "/intelligent-router"
+```

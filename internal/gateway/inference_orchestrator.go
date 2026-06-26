@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"gomodel/internal/core"
+	"gomodel/internal/intelligentrouter"
 	"gomodel/internal/usage"
 )
 
@@ -19,6 +20,17 @@ type InferenceConfig struct {
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
 	GuardrailsHash           string
+	IntelligentRouter        IntelligentRouter
+}
+
+// IntelligentRouter evaluates a request with an analyzer model and recommends a
+// concrete model selector. A nil implementation means the feature is disabled.
+// When a Decision is Applied, the orchestrator substitutes the requested
+// selector before resolution; the substituted model still goes through normal
+// authorization and provider resolution.
+type IntelligentRouter interface {
+	ShouldEvaluate(requested core.RequestedModelSelector, meta intelligentrouter.SelectionMeta) (strategy string, ok bool)
+	Evaluate(ctx context.Context, req *core.ChatRequest, requested core.RequestedModelSelector, meta intelligentrouter.SelectionMeta) *intelligentrouter.Decision
 }
 
 // InferenceOrchestrator owns translated inference workflow resolution, request
@@ -33,6 +45,7 @@ type InferenceOrchestrator struct {
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
 	guardrailsHash           string
+	intelligentRouter        IntelligentRouter
 }
 
 // NewInferenceOrchestrator creates a translated inference orchestrator.
@@ -47,6 +60,7 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,
 		guardrailsHash:           cfg.GuardrailsHash,
+		intelligentRouter:        cfg.IntelligentRouter,
 	}
 }
 

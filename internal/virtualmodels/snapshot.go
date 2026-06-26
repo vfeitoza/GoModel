@@ -141,7 +141,7 @@ func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string,
 	}
 
 	entry, ok := s.redirects[name]
-	if !ok || !entry.vm.Enabled {
+	if !ok || !entry.vm.Enabled || isIntelligentStrategy(entry.vm.Strategy) {
 		return resolution, false
 	}
 	if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {

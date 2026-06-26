@@ -490,6 +490,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PricingResolver:        pricingResolver,
 		ResponseCache:          rcm,
 	})
+	intelligentRouter, err := newIntelligentRouterFromConfig(appCfg.IntelligentRouting, internalGuardrailExecutor, providerResult.Registry, pricingResolver, vm)
+	if err != nil {
+		return fail("failed to initialize intelligent router", err)
+	}
+	serverCfg.IntelligentRouter = intelligentRouter
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		return fail("failed to wire internal guardrail executor", err)
 	}

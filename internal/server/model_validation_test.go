@@ -714,7 +714,11 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 }
 
 func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t *testing.T) {
-	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", false))
+	// Use a model name that is not an intelligent selector so the middleware
+	// still attempts resolution and can return a not_found_error. Intelligent
+	// selectors (auto, smart, auto-cost, auto-quality) are skipped by the
+	// middleware intentionally and handled by the orchestrator instead.
+	store := newAliasesTestStore(redirectVM("unknown-alias", "gpt-4o", "openai", false))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"openai/gpt-4o": true,
@@ -747,7 +751,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"smart","input":"hello"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"unknown-alias","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -759,11 +763,46 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 
 	assert.False(t, handlerCalled)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "unsupported model: smart")
-	assert.Equal(t, "smart", entry.RequestedModel)
+	assert.Contains(t, rec.Body.String(), "unsupported model: unknown-alias")
+	assert.Equal(t, "unknown-alias", entry.RequestedModel)
 	assert.Equal(t, "", entry.ResolvedModel)
 	assert.Equal(t, "", entry.Provider)
 	assert.Equal(t, "not_found_error", entry.ErrorType)
+}
+
+func TestModelValidation_IntelligentSelectorPassesThroughMiddleware(t *testing.T) {
+	// Intelligent selectors (auto, smart, auto-cost, auto-quality) must not be
+	// rejected by the workflow resolution middleware. The middleware skips model
+	// resolution for them so the orchestrator can rewrite the selector after
+	// classification.
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes:   map[string]string{"openai/gpt-4o-mini": "openai"},
+	}
+
+	e := echo.New()
+
+	for _, selector := range []string{"auto", "smart", "auto-cost", "auto-quality"} {
+		t.Run(selector, func(t *testing.T) {
+			handlerCalled := false
+			middleware := WorkflowResolution(provider)
+			handler := middleware(func(c *echo.Context) error {
+				handlerCalled = true
+				return c.String(http.StatusOK, "ok")
+			})
+
+			body := `{"model":"` + selector + `","messages":[{"role":"user","content":"hi"}]}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			err := handler(c)
+			require.NoError(t, err)
+			assert.True(t, handlerCalled, "handler must be called for intelligent selector %q", selector)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+	}
 }
 
 func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T) {

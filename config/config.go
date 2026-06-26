@@ -13,20 +13,21 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Models     ModelsConfig     `yaml:"models"`
-	Cache      CacheConfig      `yaml:"cache"`
-	Storage    StorageConfig    `yaml:"storage"`
-	Logging    LogConfig        `yaml:"logging"`
-	Usage      UsageConfig      `yaml:"usage"`
-	Budgets    BudgetsConfig    `yaml:"budgets"`
-	Metrics    MetricsConfig    `yaml:"metrics"`
-	HTTP       HTTPConfig       `yaml:"http"`
-	Admin      AdminConfig      `yaml:"admin"`
-	Guardrails GuardrailsConfig `yaml:"guardrails"`
-	Fallback   FallbackConfig   `yaml:"fallback"`
-	Workflows  WorkflowsConfig  `yaml:"workflows"`
-	Resilience ResilienceConfig `yaml:"resilience"`
+	Server             ServerConfig             `yaml:"server"`
+	Models             ModelsConfig             `yaml:"models"`
+	Cache              CacheConfig              `yaml:"cache"`
+	Storage            StorageConfig            `yaml:"storage"`
+	Logging            LogConfig                `yaml:"logging"`
+	Usage              UsageConfig              `yaml:"usage"`
+	Budgets            BudgetsConfig            `yaml:"budgets"`
+	Metrics            MetricsConfig            `yaml:"metrics"`
+	HTTP               HTTPConfig               `yaml:"http"`
+	Admin              AdminConfig              `yaml:"admin"`
+	Guardrails         GuardrailsConfig         `yaml:"guardrails"`
+	Fallback           FallbackConfig           `yaml:"fallback"`
+	Workflows          WorkflowsConfig          `yaml:"workflows"`
+	Resilience         ResilienceConfig         `yaml:"resilience"`
+	IntelligentRouting IntelligentRoutingConfig `yaml:"intelligent_routing"`
 }
 
 // LoadResult is returned by Load and bundles the application config with the raw
@@ -127,7 +128,8 @@ func buildDefaultConfig() *Config {
 			LiveLogsReplayLimit:      1000,
 			LiveLogsHeartbeatSeconds: 15,
 		},
-		Guardrails: GuardrailsConfig{},
+		Guardrails:         GuardrailsConfig{},
+		IntelligentRouting: DefaultIntelligentRoutingConfig(),
 	}
 }
 
@@ -190,6 +192,10 @@ func Load() (*LoadResult, error) {
 	}
 
 	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
+		return nil, err
+	}
+
+	if err := ValidateIntelligentRoutingConfig(&cfg.IntelligentRouting); err != nil {
 		return nil, err
 	}
 

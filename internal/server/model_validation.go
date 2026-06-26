@@ -8,6 +8,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/intelligentrouter"
 )
 
 // WorkflowResolution resolves the request-scoped workflow for model-facing
@@ -115,6 +116,18 @@ func deriveWorkflowWithPolicy(
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
+		// Peek at the model selector before resolving. Intelligent selectors
+		// (auto, smart, auto-cost, auto-quality) are not real model IDs; the
+		// orchestrator rewrites them after classification. Skip early resolution
+		// so they do not fail with model_not_found here.
+		if model, _, parsed, err := selectorHintsForValidation(c); err == nil && parsed {
+			if _, isIntelligent := intelligentrouter.IsIntelligentSelector(model); isIntelligent {
+				if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
+					return nil, err
+				}
+				return workflow, nil
+			}
+		}
 		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)
 		if err != nil {
 			return nil, err
