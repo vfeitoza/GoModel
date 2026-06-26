@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"gomodel/internal/core"
@@ -22,7 +23,7 @@ func (o *InferenceOrchestrator) evaluateIntelligentRouter(
 	req any,
 	requested core.RequestedModelSelector,
 ) core.RequestedModelSelector {
-	if o.intelligentRouter == nil {
+	if isNilIntelligentRouter(o.intelligentRouter) {
 		return requested
 	}
 	chatReq, ok := req.(*core.ChatRequest)
@@ -57,4 +58,18 @@ func (o *InferenceOrchestrator) evaluateIntelligentRouter(
 	// Preserve an explicit provider hint only when the router selected one.
 	hint := strings.TrimSpace(applied.Provider)
 	return core.NewRequestedModelSelector(applied.Model, hint)
+}
+
+// isNilIntelligentRouter reports whether the router is absent. It handles the
+// typed-nil case: an interface assigned a concrete (*Selector)(nil) is not == nil,
+// so reflecting on the underlying value prevents a panic if a typed nil ever
+// reaches the orchestrator. The construction site in the app package already
+// keeps the field at a true nil interface, but this guards against future
+// regressions.
+func isNilIntelligentRouter(r IntelligentRouter) bool {
+	if r == nil {
+		return true
+	}
+	v := reflect.ValueOf(r)
+	return v.Kind() == reflect.Ptr && v.IsNil()
 }
