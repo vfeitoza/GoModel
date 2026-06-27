@@ -144,7 +144,7 @@ func (s *Selector) Evaluate(ctx context.Context, req *core.ChatRequest, requeste
 			}
 		}
 	}
-	candidates := BuildCandidates(s.catalog, s.filter, allowOverride, class, 0)
+	candidates := BuildCandidates(s.catalog, s.filter, allowOverride, class, estimateRequestChars(req))
 	scored := RankCandidates(candidates, s.pricing, decision.Strategy, class)
 	decision.SelectedModel = s.choose(scored, requested, class)
 	decision.Duration = time.Since(start)
@@ -177,8 +177,8 @@ func (s *Selector) choose(scored []ScoreCandidate, requested core.RequestedModel
 		// Pick the highest-quality candidate rather than the top score.
 		best := scored[0]
 		for _, c := range scored[1:] {
-			if tierQualityScore(modelTier(c.Candidate.Model, c.UnitCost)) >
-				tierQualityScore(modelTier(best.Candidate.Model, best.UnitCost)) {
+			if tierQualityScore(modelTier(c.Candidate.Model)) >
+				tierQualityScore(modelTier(best.Candidate.Model)) {
 				best = c
 			}
 		}
@@ -223,6 +223,20 @@ func selectorsToPatterns(selectors []core.ModelSelector) []string {
 		patterns = append(patterns, selector.QualifiedModel())
 	}
 	return patterns
+}
+
+// estimateRequestChars sums the visible text length of every message so the
+// catalog can score how comfortably each model's context window fits the
+// request. Attachments, images, and audio are ignored — only text contributes.
+func estimateRequestChars(req *core.ChatRequest) int {
+	if req == nil {
+		return 0
+	}
+	total := 0
+	for _, msg := range req.Messages {
+		total += len(core.ExtractTextContent(msg.Content))
+	}
+	return total
 }
 
 func classToStrategy(class Classification, metaStrategy string) string {
