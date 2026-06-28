@@ -153,6 +153,15 @@ func TestAnalyzerUserPrompt_IncludesRoutingGuidanceWhenPresent(t *testing.T) {
 	require.NotContains(t, prompt, "anthropic/claude-haiku-4-5\n  routing_guidance")
 }
 
+func TestAnalyzerUserPrompt_IncludesRoutingHistoryWhenPresent(t *testing.T) {
+	prompt := analyzerUserPrompt(&core.ChatRequest{
+		Messages: []core.Message{{Role: "user", Content: "continue the analysis"}},
+	}, nil, []string{"openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"})
+	require.Contains(t, prompt, "Previous routing decisions (most recent last):")
+	require.Contains(t, prompt, "Turn 1: routed to openai/gpt-4o-mini")
+	require.Contains(t, prompt, "Turn 2: routed to anthropic/claude-haiku-4-5")
+}
+
 func TestClassifier_AttemptsRepairBeforeFailover(t *testing.T) {
 	exec := &fakeExecutor{
 		responseSeq: map[string][]string{

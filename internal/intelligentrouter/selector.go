@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"gomodel/internal/core"
@@ -130,8 +131,9 @@ func (s *Selector) Evaluate(ctx context.Context, req *core.ChatRequest, requeste
 	// candidate list is rebuilt after classification to apply capability filters
 	// (vision/tools/long-context) derived from the analyzer output.
 	analysisCandidates := BuildCandidates(s.catalog, s.filter, allowOverride, Classification{}, estimateRequestChars(req))
+	history := getRoutingHistory(meta.UserPath, meta.ConversationID, routingMemoryDefaultN)
 
-	class, analyzerUsed, err := s.classifier.ClassifyWithCandidates(ctx, req, analysisCandidates, nil)
+	class, analyzerUsed, err := s.classifier.ClassifyWithCandidates(ctx, req, analysisCandidates, history)
 	if err != nil {
 		decision.AnalysisFailed = true
 		decision.Analyzers = s.classifier.Analyzers()
@@ -167,6 +169,9 @@ func (s *Selector) Evaluate(ctx context.Context, req *core.ChatRequest, requeste
 	decision.Duration = time.Since(start)
 	decision.Reason = buildReason(class, scored, decision.SelectedModel)
 	decision.applyForMode(s.mode, requested)
+	if decision.Applied && decision.AppliedModel.Model != "" && strings.TrimSpace(meta.ConversationID) != "" {
+		addRoutingDecision(meta.UserPath, meta.ConversationID, decision.AppliedModel.QualifiedModel())
+	}
 	logDecision(decision)
 	return decision
 }

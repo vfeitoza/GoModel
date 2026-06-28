@@ -456,9 +456,10 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 
 func translatedRequestMeta(c *echo.Context) gateway.RequestMeta {
 	return gateway.RequestMeta{
-		RequestID: requestIDFromContextOrHeader(c.Request()),
-		Endpoint:  core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
-		Workflow:  core.GetWorkflow(c.Request().Context()),
+		RequestID:      requestIDFromContextOrHeader(c.Request()),
+		ConversationID: conversationIDFromHeader(c.Request()),
+		Endpoint:       core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
+		Workflow:       core.GetWorkflow(c.Request().Context()),
 	}
 }
 

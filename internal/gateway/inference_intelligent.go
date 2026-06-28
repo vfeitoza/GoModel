@@ -22,6 +22,7 @@ func (o *InferenceOrchestrator) evaluateIntelligentRouter(
 	ctx context.Context,
 	req any,
 	requested core.RequestedModelSelector,
+	requestMeta RequestMeta,
 ) core.RequestedModelSelector {
 	if isNilIntelligentRouter(o.intelligentRouter) {
 		return requested
@@ -34,7 +35,8 @@ func (o *InferenceOrchestrator) evaluateIntelligentRouter(
 	}
 	// Only invoke the analyzer for intelligent selectors/virtual models.
 	meta := intelligentrouter.SelectionMeta{
-		UserPath: core.UserPathFromContext(ctx),
+		UserPath:       core.UserPathFromContext(ctx),
+		ConversationID: strings.TrimSpace(requestMeta.ConversationID),
 	}
 	strategy, ok := o.intelligentRouter.ShouldEvaluate(requested, meta)
 	if !ok {

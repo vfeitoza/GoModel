@@ -94,7 +94,7 @@ func prepareTranslatedRequest[Req any](
 ) (context.Context, Req, *core.Workflow, error) {
 	ctx = contextWithRequestID(ctx, meta.RequestID)
 	requested := core.NewRequestedModelSelector(*model, *provider)
-	requested = o.evaluateIntelligentRouter(ctx, req, requested)
+	requested = o.evaluateIntelligentRouter(ctx, req, requested, meta)
 	*model = requested.Model
 	*provider = requested.ProviderHint
 	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, model, provider)

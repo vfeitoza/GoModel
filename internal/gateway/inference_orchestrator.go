@@ -66,9 +66,10 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 
 // RequestMeta carries transport-derived metadata into gateway use cases.
 type RequestMeta struct {
-	RequestID string
-	Endpoint  core.EndpointDescriptor
-	Workflow  *core.Workflow
+	RequestID      string
+	ConversationID string
+	Endpoint       core.EndpointDescriptor
+	Workflow       *core.Workflow
 }
 
 // PreparedChatRequest is a translated chat request ready for cache lookup or execution.

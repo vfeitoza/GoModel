@@ -263,6 +263,24 @@ You can filter usage for the analyzer alone with:
 GET /admin/usage?user_path=/intelligent-router
 ```
 
+## Conversation-aware routing
+
+When clients send a stable conversation ID, the analyzer can see the most recent
+routing decisions for that conversation and keep model choice more consistent
+across multi-turn sessions.
+
+Send the optional header:
+
+```http
+X-GoModel-Conversation-ID: conv-123
+```
+
+GoModel keeps a short in-memory history per `(user_path, conversation_id)` and
+includes it in the analyzer prompt as "Previous routing decisions". This does
+not persist anything to storage and expires automatically after a short window.
+
+If the header is absent, routing stays request-local and no history is used.
+
 ## Environment variables
 
 All top-level fields can also be set through environment variables:

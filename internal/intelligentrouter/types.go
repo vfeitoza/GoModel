@@ -52,6 +52,9 @@ type SelectionMeta struct {
 	Mode string
 	// UserPath is the effective request user_path, used for candidate filtering.
 	UserPath string
+	// ConversationID scopes recent routing-memory lookups. When empty, no
+	// conversation-aware history is attached to the analyzer prompt.
+	ConversationID string
 	// Endpoint is the request endpoint operation (e.g. openai.chat_completions).
 	Endpoint string
 	// CandidateAllow overrides the configured allow list (used by intelligent

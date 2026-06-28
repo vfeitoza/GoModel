@@ -105,3 +105,36 @@ func TestSelector_LowConfidencePrefersStrongerModel(t *testing.T) {
 	require.False(t, d.AnalysisFailed)
 	require.NotEqual(t, "mini", d.AppliedModel.Model) // low confidence avoids the cheapest
 }
+
+func TestSelector_RecordsAppliedModelInConversationMemory(t *testing.T) {
+	defaultRoutingMemory = &routingMemoryStore{data: make(map[string][]routingMemoryEntry)}
+	t.Cleanup(func() {
+		defaultRoutingMemory = &routingMemoryStore{data: make(map[string][]routingMemoryEntry)}
+	})
+
+	exec := &fakeExecutor{responses: map[string]string{"a-mini": validClassification}}
+	s := newTestSelector(t, ModeEnforce, exec)
+	req := &core.ChatRequest{Messages: []core.Message{{Role: "user", Content: "hi"}}}
+	requested := core.NewRequestedModelSelector("auto", "")
+	d := s.Evaluate(context.Background(), req, requested, SelectionMeta{Mode: ModeEnforce, UserPath: "/team", ConversationID: "conv-1"})
+
+	require.True(t, d.Applied)
+	history := getRoutingHistory("/team", "conv-1", 5)
+	require.Equal(t, []string{d.AppliedModel.QualifiedModel()}, history)
+}
+
+func TestSelector_DoesNotRecordHistoryInObserveMode(t *testing.T) {
+	defaultRoutingMemory = &routingMemoryStore{data: make(map[string][]routingMemoryEntry)}
+	t.Cleanup(func() {
+		defaultRoutingMemory = &routingMemoryStore{data: make(map[string][]routingMemoryEntry)}
+	})
+
+	exec := &fakeExecutor{responses: map[string]string{"a-mini": validClassification}}
+	s := newTestSelector(t, ModeObserve, exec)
+	req := &core.ChatRequest{Messages: []core.Message{{Role: "user", Content: "hi"}}}
+	requested := core.NewRequestedModelSelector("auto", "")
+	d := s.Evaluate(context.Background(), req, requested, SelectionMeta{Mode: ModeObserve, UserPath: "/team", ConversationID: "conv-1"})
+
+	require.False(t, d.Applied)
+	require.Nil(t, getRoutingHistory("/team", "conv-1", 5))
+}

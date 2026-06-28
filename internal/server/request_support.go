@@ -10,6 +10,8 @@ import (
 	"gomodel/internal/core"
 )
 
+const conversationIDHeader = "X-GoModel-Conversation-ID"
+
 func requestIDFromContextOrHeader(req *http.Request) string {
 	if req == nil {
 		return ""
@@ -19,6 +21,13 @@ func requestIDFromContextOrHeader(req *http.Request) string {
 		return requestID
 	}
 	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
+}
+
+func conversationIDFromHeader(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	return strings.TrimSpace(req.Header.Get(conversationIDHeader))
 }
 
 func requestContextWithRequestID(req *http.Request) (context.Context, string) {
