@@ -54,6 +54,10 @@ func tryFallbackResponse[T any](
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
+	// Record the primary failure so the intelligent router can adjust future rankings.
+	if !isNilIntelligentRouter(o.intelligentRouter) && strings.TrimSpace(primaryModel) != "" {
+		o.intelligentRouter.RecordExecution(primaryModel, false)
+	}
 	lastErr := primaryErr
 	for _, selector := range fallbacks {
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
@@ -79,6 +83,10 @@ func tryFallbackResponse[T any](
 				"provider_type", resolvedProviderType,
 			)
 			return resp, resolvedProviderType, providerName, qualified, true, nil
+		}
+		// Record this fallback failure too.
+		if !isNilIntelligentRouter(o.intelligentRouter) {
+			o.intelligentRouter.RecordExecution(qualified, false)
 		}
 		lastErr = err
 	}

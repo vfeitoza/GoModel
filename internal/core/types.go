@@ -173,6 +173,11 @@ type ModelMetadata struct {
 	Modes           []string                `json:"modes,omitempty" yaml:"modes,omitempty"`
 	Categories      []ModelCategory         `json:"categories,omitempty" yaml:"categories,omitempty"`
 	Tags            []string                `json:"tags,omitempty" yaml:"tags,omitempty"`
+	// RoutingGuidance is an operator hint for the intelligent router/analyzer.
+	// It describes when this model should be preferred (e.g. complex reasoning,
+	// fast summaries, code generation). It is advisory only: hard capability
+	// requirements still win.
+	RoutingGuidance string                  `json:"routing_guidance,omitempty" yaml:"routing_guidance,omitempty"`
 	ContextWindow   *int                    `json:"context_window,omitempty" yaml:"context_window,omitempty"`
 	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty" yaml:"max_output_tokens,omitempty"`
 	Capabilities    map[string]bool         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
@@ -413,6 +418,7 @@ func (m *ModelMetadata) Clone() *ModelMetadata {
 	} else {
 		out.Tags = nil
 	}
+	out.RoutingGuidance = m.RoutingGuidance
 	if len(m.Capabilities) > 0 {
 		caps := make(map[string]bool, len(m.Capabilities))
 		for k, v := range m.Capabilities {

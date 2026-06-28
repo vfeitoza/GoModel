@@ -13,6 +13,7 @@ import (
 	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
+	"gomodel/internal/gateway"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -24,6 +25,7 @@ type Handler struct {
 	modelResolver                   RequestModelResolver
 	modelAuthorizer                 RequestModelAuthorizer
 	fallbackResolver                RequestFallbackResolver
+	intelligentRouter               gateway.IntelligentRouter
 	workflowPolicyResolver          RequestWorkflowPolicyResolver
 	translatedRequestPatcher        TranslatedRequestPatcher
 	batchRequestPreparer            BatchRequestPreparer
@@ -170,6 +172,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			modelAuthorizer:          h.modelAuthorizer,
 			workflowPolicyResolver:   h.workflowPolicyResolver,
 			fallbackResolver:         h.fallbackResolver,
+			intelligentRouter:        h.intelligentRouter,
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,

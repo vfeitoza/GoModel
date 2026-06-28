@@ -33,6 +33,7 @@ type translatedInferenceService struct {
 	modelAuthorizer          RequestModelAuthorizer
 	workflowPolicyResolver   RequestWorkflowPolicyResolver
 	fallbackResolver         RequestFallbackResolver
+	intelligentRouter        gateway.IntelligentRouter
 	translatedRequestPatcher TranslatedRequestPatcher
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
@@ -68,6 +69,7 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		ModelAuthorizer:          s.modelAuthorizer,
 		WorkflowPolicyResolver:   s.workflowPolicyResolver,
 		FallbackResolver:         s.fallbackResolver,
+		IntelligentRouter:        s.intelligentRouter,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,
@@ -454,9 +456,10 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 
 func translatedRequestMeta(c *echo.Context) gateway.RequestMeta {
 	return gateway.RequestMeta{
-		RequestID: requestIDFromContextOrHeader(c.Request()),
-		Endpoint:  core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
-		Workflow:  core.GetWorkflow(c.Request().Context()),
+		RequestID:      requestIDFromContextOrHeader(c.Request()),
+		ConversationID: conversationIDFromHeader(c.Request()),
+		Endpoint:       core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
+		Workflow:       core.GetWorkflow(c.Request().Context()),
 	}
 }
 

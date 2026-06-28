@@ -51,6 +51,43 @@ var (
 		},
 		[]string{"provider", "provider_name", "operation"},
 	)
+
+	// IntelligentRoutingRequestsTotal counts intelligent routing evaluations.
+	IntelligentRoutingRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_intelligent_routing_requests_total",
+			Help: "Total number of intelligent routing evaluations",
+		},
+		[]string{"mode", "strategy", "applied", "analysis_failed"},
+	)
+
+	// IntelligentRoutingDecisionLatency measures analyzer+selection latency.
+	IntelligentRoutingDecisionLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "gomodel_intelligent_routing_latency_seconds",
+			Help:    "Intelligent routing analyzer and selection latency in seconds",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 5},
+		},
+		[]string{"mode", "strategy", "analysis_failed"},
+	)
+
+	// IntelligentRoutingFallbacksTotal counts decisions that used fallback after analyzer failure.
+	IntelligentRoutingFallbacksTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_intelligent_routing_fallbacks_total",
+			Help: "Total intelligent routing fallback decisions after analyzer failure or no candidate",
+		},
+		[]string{"mode", "strategy"},
+	)
+
+	// IntelligentRoutingLowConfidenceTotal counts low-confidence analyzer decisions.
+	IntelligentRoutingLowConfidenceTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_intelligent_routing_low_confidence_total",
+			Help: "Total intelligent routing low-confidence decisions",
+		},
+		[]string{"mode", "strategy"},
+	)
 )
 
 // NewPrometheusHooks returns hooks that instrument LLM requests with Prometheus metrics.

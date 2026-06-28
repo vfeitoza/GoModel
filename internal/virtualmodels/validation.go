@@ -24,26 +24,39 @@ func newValidationError(message string, err error) error {
 func normalizeRedirect(vm VirtualModel) (VirtualModel, core.ModelSelector, error) {
 	vm.Source = strings.TrimSpace(vm.Source)
 	vm.Description = strings.TrimSpace(vm.Description)
-	vm.Strategy = strings.TrimSpace(vm.Strategy)
+	strategy := strings.ToLower(strings.TrimSpace(vm.Strategy))
+	vm.Strategy = strategy
+	intelligent := isIntelligentStrategy(strategy)
 
 	if vm.Source == "" {
 		return VirtualModel{}, core.ModelSelector{}, newValidationError("source is required", nil)
 	}
-	if vm.Strategy != "" || len(vm.Targets) > 1 {
+	if (vm.Strategy != "" || len(vm.Targets) > 1) && !intelligent {
 		return VirtualModel{}, core.ModelSelector{}, newValidationError("multi-target redirects (load balancing) are not yet supported", nil)
 	}
-
-	target := vm.Targets[0]
-	target.Provider = strings.TrimSpace(target.Provider)
-	target.Model = strings.TrimSpace(target.Model)
-	if target.Model == "" {
+	if len(vm.Targets) == 0 {
 		return VirtualModel{}, core.ModelSelector{}, newValidationError("target_model is required", nil)
 	}
-	vm.Targets = []Target{target}
 
-	selector, err := target.selector()
-	if err != nil {
-		return VirtualModel{}, core.ModelSelector{}, newValidationError("invalid target selector: "+err.Error(), err)
+	var first core.ModelSelector
+	for i := range vm.Targets {
+		target := vm.Targets[i]
+		target.Provider = strings.TrimSpace(target.Provider)
+		target.Model = strings.TrimSpace(target.Model)
+		if target.Model == "" {
+			return VirtualModel{}, core.ModelSelector{}, newValidationError("target_model is required", nil)
+		}
+		selector, err := target.selector()
+		if err != nil {
+			return VirtualModel{}, core.ModelSelector{}, newValidationError("invalid target selector: "+err.Error(), err)
+		}
+		if i == 0 {
+			first = selector
+		}
+		vm.Targets[i] = target
+	}
+	if !intelligent && len(vm.Targets) > 1 {
+		vm.Targets = vm.Targets[:1]
 	}
 
 	// Redirects now enforce user_paths (scoped redirects), so an invalid path
@@ -54,7 +67,7 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, core.ModelSelector, error
 		return VirtualModel{}, core.ModelSelector{}, err
 	}
 	vm.UserPaths = paths
-	return vm, selector, nil
+	return vm, first, nil
 }
 
 // normalizePolicyInput trims a policy virtual model and normalizes its selector
@@ -122,6 +135,11 @@ func normalizeUserPaths(paths []string) ([]string, error) {
 		return nil, nil
 	}
 	return normalized, nil
+}
+
+func isIntelligentStrategy(strategy string) bool {
+	strategy = strings.ToLower(strings.TrimSpace(strategy))
+	return strategy == "intelligent" || strings.HasPrefix(strategy, "intelligent:")
 }
 
 func selectorString(providerName, model string) string {

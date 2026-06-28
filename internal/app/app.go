@@ -490,6 +490,19 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PricingResolver:        pricingResolver,
 		ResponseCache:          rcm,
 	})
+	intelligentRouter, err := newIntelligentRouterFromConfig(appCfg.IntelligentRouting, internalGuardrailExecutor, providerResult.Registry, pricingResolver, vm)
+	if err != nil {
+		return fail("failed to initialize intelligent router", err)
+	}
+	// Assign only when non-nil. newIntelligentRouterFromConfig may return a nil
+	// *intelligentrouter.Selector when the feature is inactive; assigning that
+	// typed nil directly to the gateway.IntelligentRouter interface would yield a
+	// non-nil interface wrapping a nil pointer, which defeats the `== nil` guard
+	// in the orchestrator and panics on every request. Leave the field at its
+	// zero value (a true nil interface) so the guard works.
+	if intelligentRouter != nil {
+		serverCfg.IntelligentRouter = intelligentRouter
+	}
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		return fail("failed to wire internal guardrail executor", err)
 	}
