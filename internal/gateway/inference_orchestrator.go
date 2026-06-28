@@ -34,6 +34,8 @@ type IntelligentRouter interface {
 	// RecordExecution records a provider call outcome for health-based scoring.
 	// qualifiedModel must be a fully qualified selector (provider/model).
 	RecordExecution(qualifiedModel string, success bool)
+	// IsSelector reports whether name is a configured intelligent selector.
+	IsSelector(name string) bool
 }
 
 // InferenceOrchestrator owns translated inference workflow resolution, request

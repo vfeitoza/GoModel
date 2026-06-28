@@ -64,6 +64,7 @@ type Config struct {
 	FallbackResolver                RequestFallbackResolver                // Optional: translated-route fallback resolver
 	IntelligentRouter               gateway.IntelligentRouter              // Optional: intelligent model selector for translated routes
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
+	IntelligentModelLister          ExposedModelLister                     // Optional: intelligent selectors to surface in GET /v1/models when the router is active
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
@@ -132,6 +133,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	var fallbackResolver RequestFallbackResolver
 	var intelligentRouter gateway.IntelligentRouter
 	var translatedRequestPatcher TranslatedRequestPatcher
+	var intelligentModelLister ExposedModelLister
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
 		modelAuthorizer = cfg.ModelAuthorizer
@@ -139,11 +141,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		fallbackResolver = cfg.FallbackResolver
 		intelligentRouter = cfg.IntelligentRouter
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
+		intelligentModelLister = cfg.IntelligentModelLister
 	}
 
 	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, fallbackResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
 	handler.intelligentRouter = intelligentRouter
+	handler.intelligentModelLister = intelligentModelLister
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister
@@ -295,7 +299,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Workflow resolution resolves the request-scoped workflow after auth so
 	// managed auth key user-path overrides are visible to policy resolution while
 	// still keeping workflow resolution failures loggable through the audit middleware.
-	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
+	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver, intelligentRouter))
 
 	// Public routes
 	e.GET("/health", handler.Health)

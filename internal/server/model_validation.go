@@ -8,6 +8,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 	"gomodel/internal/intelligentrouter"
 )
 
@@ -16,14 +17,14 @@ import (
 // provider type, and any early model routing decision that downstream handlers
 // or middleware need to consume.
 func WorkflowResolution(provider core.RoutableProvider) echo.MiddlewareFunc {
-	return WorkflowResolutionWithResolverAndPolicy(provider, nil, nil)
+	return WorkflowResolutionWithResolverAndPolicy(provider, nil, nil, nil)
 }
 
 // WorkflowResolutionWithResolver resolves request-scoped workflows using
 // an explicit selector resolver when provided. This lets workflow resolution own
 // alias policy instead of depending on provider decorators.
 func WorkflowResolutionWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
-	return WorkflowResolutionWithResolverAndPolicy(provider, resolver, nil)
+	return WorkflowResolutionWithResolverAndPolicy(provider, resolver, nil, nil)
 }
 
 // WorkflowResolutionWithResolverAndPolicy resolves request-scoped workflows
@@ -32,6 +33,7 @@ func WorkflowResolutionWithResolverAndPolicy(
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
 	policyResolver RequestWorkflowPolicyResolver,
+	intelligentRouter gateway.IntelligentRouter,
 ) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -39,7 +41,7 @@ func WorkflowResolutionWithResolverAndPolicy(
 			if !core.IsModelInteractionPath(path) {
 				return next(c)
 			}
-			workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver)
+			workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver, intelligentRouter)
 			if err != nil {
 				return handleError(c, err)
 			}
@@ -56,6 +58,7 @@ func deriveWorkflowWithPolicy(
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
 	policyResolver RequestWorkflowPolicyResolver,
+	intelligentRouter gateway.IntelligentRouter,
 ) (*core.Workflow, error) {
 	if c == nil {
 		return nil, nil
@@ -117,11 +120,18 @@ func deriveWorkflowWithPolicy(
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
 		// Peek at the model selector before resolving. Intelligent selectors
-		// (auto, smart, auto-cost, auto-quality) are not real model IDs; the
-		// orchestrator rewrites them after classification. Skip early resolution
-		// so they do not fail with model_not_found here.
+		// are not real model IDs; the orchestrator rewrites them after
+		// classification. Skip early resolution so they do not fail with
+		// model_not_found here.
 		if model, _, parsed, err := selectorHintsForValidation(c); err == nil && parsed {
-			if _, isIntelligent := intelligentrouter.IsIntelligentSelector(model); isIntelligent {
+			isIntelligent := false
+			if intelligentRouter != nil {
+				isIntelligent = intelligentRouter.IsSelector(model)
+			} else {
+				// Fallback to the built-in defaults when the router is absent.
+				_, isIntelligent = intelligentrouter.IsIntelligentSelector(model)
+			}
+			if isIntelligent {
 				if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
 					return nil, err
 				}

@@ -75,6 +75,12 @@ curl -X POST https://your-gateway/v1/chat/completions \
   }'
 ```
 
+When intelligent routing is active (`mode: observe` or `mode: enforce`), these
+selectors are also exposed through `GET /v1/models` as virtual model entries.
+That makes them discoverable to SDKs, dashboards, and clients that build model
+pickers from the models endpoint. When the router is off, they are hidden and
+behave like unknown model IDs.
+
 ## Analyzers
 
 Analyzers are the cheap models GoModel uses to classify each incoming request.

@@ -71,7 +71,7 @@ func ensureTranslatedWorkflow(
 		return workflow, nil
 	}
 
-	workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver)
+	workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver, nil)
 	if err != nil || workflow == nil {
 		return workflow, err
 	}

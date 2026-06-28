@@ -31,6 +31,7 @@ import (
 	"gomodel/internal/filestore"
 	"gomodel/internal/gateway"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/intelligentrouter"
 	"gomodel/internal/observability"
 	provideradapter "gomodel/internal/providers"
 	"gomodel/internal/responsestore"
@@ -3101,6 +3102,73 @@ func TestListModels_KeepOnlyAliasesOmitsProviderModels(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Len(t, resp.Data, 1)
 	require.Equal(t, "smart", resp.Data[0].ID)
+}
+
+func TestListModels_IncludesIntelligentSelectorsWhenListerConfigured(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{{ID: "gpt-4o", Object: "model", OwnedBy: "openai"}},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.intelligentModelLister = staticExposedModelLister{models: intelligentrouter.SelectorsAsModels(intelligentrouter.DefaultSelectorNames)}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ListModels(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp core.ModelsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	ids := make([]string, 0, len(resp.Data))
+	for _, model := range resp.Data {
+		ids = append(ids, model.ID)
+	}
+	require.Contains(t, ids, "gpt-4o")
+	require.Contains(t, ids, "auto")
+	require.Contains(t, ids, "smart")
+	require.Contains(t, ids, "auto-cost")
+	require.Contains(t, ids, "auto-quality")
+}
+
+func TestListModels_KeepOnlyAliasesAlsoIncludesIntelligentSelectors(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{{ID: "gpt-4o", Object: "model", OwnedBy: "openai"}},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.keepOnlyAliasesAtModelsEndpoint = true
+	handler.intelligentModelLister = staticExposedModelLister{models: intelligentrouter.SelectorsAsModels(intelligentrouter.DefaultSelectorNames)}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ListModels(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp core.ModelsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	ids := make([]string, 0, len(resp.Data))
+	for _, model := range resp.Data {
+		ids = append(ids, model.ID)
+	}
+	require.NotContains(t, ids, "gpt-4o")
+	require.Contains(t, ids, "auto")
+	require.Contains(t, ids, "smart")
+	require.Contains(t, ids, "auto-cost")
+	require.Contains(t, ids, "auto-quality")
 }
 
 func TestListModels_FiltersExposedModelsWhenAuthorizerIsPresent(t *testing.T) {

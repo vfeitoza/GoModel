@@ -44,6 +44,16 @@ func newIntelligentRouterFromConfig(
 		return nil, err
 	}
 
+	selectors := make([]intelligentrouter.SelectorConfig, 0, len(cfg.Selectors))
+	for _, sel := range cfg.Selectors {
+		if sel.Name != "" {
+			selectors = append(selectors, intelligentrouter.SelectorConfig{
+				Name:     sel.Name,
+				Strategy: sel.Strategy,
+			})
+		}
+	}
+
 	selector := intelligentrouter.NewSelector(intelligentrouter.Config{
 		Classifier:      classifier,
 		Catalog:         catalog,
@@ -57,6 +67,7 @@ func newIntelligentRouterFromConfig(
 		MinConfidence:   cfg.Defaults.MinConfidence,
 		FallbackModel:   cfg.FallbackModel,
 		Mode:            cfg.Mode,
+		Selectors:       selectors,
 	})
 	if selector == nil {
 		slog.Warn("intelligent router selector is nil after construction (mode may be off)")

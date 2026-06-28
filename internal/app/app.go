@@ -502,6 +502,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// zero value (a true nil interface) so the guard works.
 	if intelligentRouter != nil {
 		serverCfg.IntelligentRouter = intelligentRouter
+		serverCfg.IntelligentModelLister = intelligentRouter
 	}
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		return fail("failed to wire internal guardrail executor", err)

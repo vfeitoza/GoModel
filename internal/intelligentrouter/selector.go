@@ -24,19 +24,30 @@ type Config struct {
 	MinConfidence   float64
 	FallbackModel   string // selector used when analysis fails
 	Mode            string
+	// Selectors are the intelligent selector names and their strategies to
+	// recognise at request time. When empty, the built-in defaults (auto, smart,
+	// auto-cost, auto-quality) are used.
+	Selectors []SelectorConfig
+}
+
+// SelectorConfig pairs a selector name with the strategy it should apply.
+type SelectorConfig struct {
+	Name     string
+	Strategy string
 }
 
 // Selector classifies a request and selects the best catalog model.
 type Selector struct {
-	classifier *Classifier
-	catalog    Catalog
-	pricing    PricingResolver
-	virtual    VirtualTargetResolver
-	filter     CandidateFilter
-	minSavings float64
-	minConf    float64
-	fallback   string
-	mode       string
+	classifier         *Classifier
+	catalog            Catalog
+	pricing            PricingResolver
+	virtual            VirtualTargetResolver
+	filter             CandidateFilter
+	minSavings         float64
+	minConf            float64
+	fallback           string
+	mode               string
+	selectorStrategies map[string]string
 }
 
 // NewSelector constructs a Selector. Returns nil (no error) when the feature is
@@ -57,17 +68,53 @@ func NewSelector(cfg Config) *Selector {
 	if minConf <= 0 {
 		minConf = 0.7
 	}
-	return &Selector{
-		classifier: cfg.Classifier,
-		catalog:    cfg.Catalog,
-		pricing:    cfg.Pricing,
-		virtual:    cfg.VirtualResolver,
-		filter:     cfg.Filter,
-		minSavings: minSavings,
-		minConf:    minConf,
-		fallback:   cfg.FallbackModel,
-		mode:       mode,
+
+	strategies := make(map[string]string, len(cfg.Selectors))
+	if len(cfg.Selectors) == 0 {
+		for _, name := range DefaultSelectorNames {
+			if strat, ok := defaultSelectorStrategy[name]; ok {
+				strategies[name] = strat
+			}
+		}
+	} else {
+		for _, sel := range cfg.Selectors {
+			name := strings.ToLower(strings.TrimSpace(sel.Name))
+			if name == "" {
+				continue
+			}
+			strat := strings.ToLower(strings.TrimSpace(sel.Strategy))
+			if strat == "" {
+				strat = defaultSelectorStrategy[name]
+			}
+			strategies[name] = strat
+		}
 	}
+
+	return &Selector{
+		classifier:         cfg.Classifier,
+		catalog:            cfg.Catalog,
+		pricing:            cfg.Pricing,
+		virtual:            cfg.VirtualResolver,
+		filter:             cfg.Filter,
+		minSavings:         minSavings,
+		minConf:            minConf,
+		fallback:           cfg.FallbackModel,
+		mode:               mode,
+		selectorStrategies: strategies,
+	}
+}
+
+// ExposedModels returns the intelligent selectors projected as virtual model
+// entries for inclusion in GET /v1/models. Returns nil when the router is nil.
+func (s *Selector) ExposedModels() []core.Model {
+	if s == nil {
+		return nil
+	}
+	names := make([]string, 0, len(s.selectorStrategies))
+	for name := range s.selectorStrategies {
+		names = append(names, name)
+	}
+	return SelectorsAsModels(names)
 }
 
 func normalizeMode(mode string) string {
@@ -88,13 +135,22 @@ func (s *Selector) RecordExecution(qualifiedModel string, success bool) {
 	RecordHealth(qualifiedModel, success)
 }
 
+// IsSelector reports whether name is a configured intelligent selector.
+func (s *Selector) IsSelector(name string) bool {
+	if s == nil {
+		return false
+	}
+	_, isConfigured := s.selectorStrategies[name]
+	return isConfigured
+}
+
 // ShouldEvaluate reports whether the requested selector should trigger
 // intelligent routing. It returns the strategy to use and whether the request
 // is an intelligent virtual model (whose targets override the candidate filter).
 func (s *Selector) ShouldEvaluate(requested core.RequestedModelSelector, meta SelectionMeta) (strategy string, ok bool) {
-	strategy, isSelector := IsIntelligentSelector(requested.Model)
-	if isSelector {
-		return resolveStrategy(strategy, meta), true
+	// Check configured selector strategies
+	if strat, isConfigured := s.selectorStrategies[requested.Model]; isConfigured {
+		return resolveStrategy(strat, meta), true
 	}
 	// Intelligent virtual model?
 	if s.virtual != nil && !requested.ExplicitProvider {

@@ -30,6 +30,7 @@ type Handler struct {
 	translatedRequestPatcher        TranslatedRequestPatcher
 	batchRequestPreparer            BatchRequestPreparer
 	exposedModelLister              ExposedModelLister
+	intelligentModelLister          ExposedModelLister
 	keepOnlyAliasesAtModelsEndpoint bool
 	logger                          auditlog.LoggerInterface
 	usageLogger                     usage.LoggerInterface
@@ -447,6 +448,9 @@ func (h *Handler) ListModels(c *echo.Context) error {
 			}
 			resp = mergeExposedModelsResponse(resp, exposed)
 		}
+	}
+	if h.intelligentModelLister != nil {
+		resp = mergeExposedModelsResponse(resp, h.intelligentModelLister.ExposedModels())
 	}
 
 	return c.JSON(http.StatusOK, resp)

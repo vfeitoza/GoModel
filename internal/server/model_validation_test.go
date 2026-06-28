@@ -316,7 +316,7 @@ func TestModelValidation_StoresMatchedWorkflowPolicy(t *testing.T) {
 		},
 	}
 
-	middleware := WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)
+	middleware := WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver, nil)
 	handler := middleware(func(c *echo.Context) error {
 		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
@@ -359,7 +359,7 @@ func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 	}
 
 	middleware := RequestSnapshotCapture()
-	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver, nil)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}))
 
@@ -452,7 +452,7 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 	}
 
 	middleware := RequestSnapshotCapture()
-	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver, nil)(func(c *echo.Context) error {
 		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	}))
