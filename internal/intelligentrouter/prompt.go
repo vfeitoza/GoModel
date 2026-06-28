@@ -28,16 +28,56 @@ Guidelines:
 - requires_tools: true only when the request explicitly uses tool calling.
 - suggested_tier: "cheap" for low complexity/low quality sensitivity, "premium" for high complexity/reasoning/hard code.
 - confidence: how sure you are of the classification (0 to 1).
-- reason: a brief tag-style reason. Never copy names, secrets, or user content.`
+- reason: a brief tag-style reason. Never copy names, secrets, or user content.
+- routing_guidance fields are operator hints for when each model should be preferred. Use them as a strong signal, but never violate hard capability requirements.`
 
 // analyzerUserPrompt renders the compact, anonymized summary of the request for
-// the analyzer. It includes only role + a truncated text preview, never
-// attachments, images, audio, or full message bodies.
-func analyzerUserPrompt(req *core.ChatRequest) string {
+// the analyzer. It includes only role + a truncated text preview, optional
+// recent routing history, and a list of candidate models with routing guidance
+// when configured. It never includes attachments, images, audio, or full
+// message bodies.
+func analyzerUserPrompt(req *core.ChatRequest, candidates []Candidate, history []string) string {
 	var b strings.Builder
 	b.WriteString("Classify this request. Tool calls are present: ")
 	b.WriteString(boolStr(len(req.Tools) > 0 || hasToolCalls(req.Messages)))
-	b.WriteString(".\n\nMessages (text preview, truncated):\n")
+	b.WriteString(".\n\n")
+
+	if len(history) > 0 {
+		b.WriteString("Previous routing decisions (most recent last):\n")
+		for i, model := range history {
+			fmt.Fprintf(&b, "- Turn %d: routed to %s\n", i+1, model)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(candidates) > 0 {
+		guidanceWritten := false
+		for _, c := range candidates {
+			if c.Model != nil && c.Model.Metadata != nil && strings.TrimSpace(c.Model.Metadata.RoutingGuidance) != "" {
+				guidanceWritten = true
+				break
+			}
+		}
+		if guidanceWritten {
+			b.WriteString("Available models:\n")
+			for _, c := range candidates {
+				if c.Model == nil || c.Model.Metadata == nil {
+					continue
+				}
+				guidance := strings.TrimSpace(c.Model.Metadata.RoutingGuidance)
+				if guidance == "" {
+					continue
+				}
+				if len([]rune(guidance)) > 160 {
+					guidance = string([]rune(guidance)[:160]) + "…"
+				}
+				fmt.Fprintf(&b, "- id: \"%s\"\n  routing_guidance: \"%s\"\n", c.Selector.QualifiedModel(), guidance)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("Messages (text preview, truncated):\n")
 	for i, msg := range req.Messages {
 		if i >= 8 {
 			b.WriteString("…(additional messages omitted)\n")

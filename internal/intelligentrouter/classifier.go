@@ -62,14 +62,26 @@ func (c *Classifier) Analyzers() []core.ModelSelector {
 // Classify runs the analyzer pool against the request and returns the first
 // successful classification plus the analyzer that produced it. When every
 // analyzer fails, it returns an error so the caller can fall back.
+//
+// The prompt may optionally include candidate metadata (routing guidance) and a
+// short routing history; callers that do not have either can keep using this
+// convenience wrapper.
 func (c *Classifier) Classify(ctx context.Context, req *core.ChatRequest) (Classification, core.ModelSelector, error) {
+	return c.ClassifyWithCandidates(ctx, req, nil, nil)
+}
+
+// ClassifyWithCandidates is the full classifier entry point. candidates enrich
+// the prompt with model-specific routing guidance when present. history adds the
+// most recent routing decisions (conversation-aware routing) in most-recent-last
+// order; it is optional and nil-safe.
+func (c *Classifier) ClassifyWithCandidates(ctx context.Context, req *core.ChatRequest, candidates []Candidate, history []string) (Classification, core.ModelSelector, error) {
 	var zero core.ModelSelector
 	if req == nil {
 		return Classification{}, zero, fmt.Errorf("intelligent router: request is required")
 	}
 
 	pool := c.Analyzers()
-	prompt := analyzerUserPrompt(req)
+	prompt := analyzerUserPrompt(req, candidates, history)
 	temperature := 0.0
 
 	var lastErr error
@@ -117,10 +129,47 @@ func (c *Classifier) tryAnalyzer(ctx context.Context, analyzer core.ModelSelecto
 		return Classification{}, analyzer, fmt.Errorf("analyzer returned empty content")
 	}
 	classification, err := parseClassification(content)
-	if err != nil {
-		return Classification{}, analyzer, err
+	if err == nil {
+		return classification, analyzer, nil
 	}
-	return classification, analyzer, nil
+
+	// One repair attempt on the same analyzer before failing over to the next one.
+	slog.Warn("intelligent router analyzer returned invalid JSON; attempting repair",
+		"analyzer", analyzer.QualifiedModel(),
+		"error", err,
+	)
+	repaired, repairErr := c.repairClassification(callCtx, analyzer, temperature, maxTokens)
+	if repairErr == nil {
+		slog.Info("intelligent router analyzer repair succeeded",
+			"analyzer", analyzer.QualifiedModel(),
+		)
+		return repaired, analyzer, nil
+	}
+	return Classification{}, analyzer, fmt.Errorf("parse analyzer response: %w (repair failed: %v)", err, repairErr)
+}
+
+func (c *Classifier) repairClassification(ctx context.Context, analyzer core.ModelSelector, temperature float64, maxTokens int) (Classification, error) {
+	resp, err := c.executor.ChatCompletion(ctx, &core.ChatRequest{
+		Model:       analyzer.Model,
+		Provider:    analyzer.Provider,
+		Temperature: &temperature,
+		MaxTokens:   &maxTokens,
+		Messages: []core.Message{
+			{Role: "system", Content: analyzerSystemPrompt},
+			{Role: "user", Content: "Your previous response was invalid JSON. Return ONLY the compact JSON object described in the system prompt."},
+		},
+	})
+	if err != nil {
+		return Classification{}, err
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return Classification{}, fmt.Errorf("repair analyzer returned no choices")
+	}
+	content := core.ExtractTextContent(resp.Choices[0].Message.Content)
+	if strings.TrimSpace(content) == "" {
+		return Classification{}, fmt.Errorf("repair analyzer returned empty content")
+	}
+	return parseClassification(content)
 }
 
 func (c *Classifier) maxTokensFor(analyzer core.ModelSelector) int {

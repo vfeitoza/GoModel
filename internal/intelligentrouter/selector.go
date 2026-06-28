@@ -115,7 +115,23 @@ func (s *Selector) Evaluate(ctx context.Context, req *core.ChatRequest, requeste
 		Strategy:  meta.Strategy,
 	}
 
-	class, analyzerUsed, err := s.classifier.Classify(ctx, req)
+	allowOverride := meta.CandidateAllow
+	if s.virtual != nil && !requested.ExplicitProvider {
+		if targets, vmStrategy, ok := s.virtual.IntelligentTargets(requested.Model, meta.UserPath); ok {
+			allowOverride = selectorsToPatterns(targets)
+			if meta.Strategy == "" && vmStrategy != "" {
+				decision.Strategy = vmStrategy
+			}
+		}
+	}
+
+	// Build a first-pass candidate list before classification so the analyzer can
+	// see operator-provided routing guidance for the eligible pool. The final
+	// candidate list is rebuilt after classification to apply capability filters
+	// (vision/tools/long-context) derived from the analyzer output.
+	analysisCandidates := BuildCandidates(s.catalog, s.filter, allowOverride, Classification{}, estimateRequestChars(req))
+
+	class, analyzerUsed, err := s.classifier.ClassifyWithCandidates(ctx, req, analysisCandidates, nil)
 	if err != nil {
 		decision.AnalysisFailed = true
 		decision.Analyzers = s.classifier.Analyzers()
@@ -135,7 +151,8 @@ func (s *Selector) Evaluate(ctx context.Context, req *core.ChatRequest, requeste
 	decision.Confidence = class.Confidence
 	decision.Strategy = resolveStrategy(classToStrategy(class, meta.Strategy), meta)
 
-	allowOverride := meta.CandidateAllow
+	// Recompute the allowlist if the intelligent virtual model supplied an
+	// explicit strategy and the analyzer did not override it.
 	if s.virtual != nil && !requested.ExplicitProvider {
 		if targets, vmStrategy, ok := s.virtual.IntelligentTargets(requested.Model, meta.UserPath); ok {
 			allowOverride = selectorsToPatterns(targets)

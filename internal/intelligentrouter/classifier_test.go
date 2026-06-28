@@ -13,15 +13,31 @@ import (
 // fakeExecutor is a ChatCompletionExecutor that returns canned responses per
 // analyzer model, allowing failover behavior to be exercised.
 type fakeExecutor struct {
-	responses map[string]string // model -> content
-	errs      map[string]error  // model -> forced error
-	calls     []string          // ordered list of models called
+	responses    map[string]string   // model -> content (legacy single response)
+	responseSeq  map[string][]string // model -> ordered contents per call
+	errs         map[string]error    // model -> forced error (legacy single error)
+	errsSeq      map[string][]error  // model -> ordered errors per call
+	calls        []string            // ordered list of models called
 }
 
 func (f *fakeExecutor) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	f.calls = append(f.calls, req.Model)
+	if seq, ok := f.errsSeq[req.Model]; ok && len(seq) > 0 {
+		err := seq[0]
+		f.errsSeq[req.Model] = seq[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err, ok := f.errs[req.Model]; ok {
 		return nil, err
+	}
+	if seq, ok := f.responseSeq[req.Model]; ok && len(seq) > 0 {
+		content := seq[0]
+		f.responseSeq[req.Model] = seq[1:]
+		return &core.ChatResponse{
+			Choices: []core.Choice{{Message: core.ResponseMessage{Content: content}, FinishReason: "stop"}},
+		}, nil
 	}
 	content, ok := f.responses[req.Model]
 	if !ok {
@@ -92,7 +108,9 @@ func TestClassifier_MalformedJSONFailsOver(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "b-mini", used.Model)
 	require.Equal(t, "chat", class.TaskType)
-	require.Equal(t, []string{"a-mini", "b-mini"}, exec.calls)
+	// The first analyzer is called twice: initial attempt + one repair attempt,
+	// then failover continues to the next analyzer.
+	require.Equal(t, []string{"a-mini", "a-mini", "b-mini"}, exec.calls)
 }
 
 func TestParseClassification_ToleratesCodeFence(t *testing.T) {
@@ -112,4 +130,64 @@ func TestNewClassifier_RequiresExecutorAndAnalyzer(t *testing.T) {
 	require.Error(t, err)
 	_, err = NewClassifier(&fakeExecutor{}, nil, 0, 0, "")
 	require.Error(t, err)
+}
+
+func TestAnalyzerUserPrompt_IncludesRoutingGuidanceWhenPresent(t *testing.T) {
+	guide := "Use for complex reasoning and architecture"
+	candidates := []Candidate{
+		{
+			Selector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-8"},
+			Model: &core.Model{Metadata: &core.ModelMetadata{RoutingGuidance: guide}},
+		},
+		{
+			Selector: core.ModelSelector{Provider: "anthropic", Model: "claude-haiku-4-5"},
+			Model: &core.Model{Metadata: &core.ModelMetadata{}},
+		},
+	}
+	prompt := analyzerUserPrompt(&core.ChatRequest{
+		Messages: []core.Message{{Role: "user", Content: "help me design a system"}},
+	}, candidates, nil)
+	require.Contains(t, prompt, "Available models:")
+	require.Contains(t, prompt, "anthropic/claude-opus-4-8")
+	require.Contains(t, prompt, guide)
+	require.NotContains(t, prompt, "anthropic/claude-haiku-4-5\n  routing_guidance")
+}
+
+func TestClassifier_AttemptsRepairBeforeFailover(t *testing.T) {
+	exec := &fakeExecutor{
+		responseSeq: map[string][]string{
+			"a-mini": {"not json at all", validClassification},
+		},
+	}
+	cls, err := NewClassifier(exec, []AnalyzerConfig{{Model: "a-mini"}, {Model: "b-mini"}}, 0, 0, "")
+	require.NoError(t, err)
+
+	class, used, err := cls.Classify(context.Background(), &core.ChatRequest{
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "a-mini", used.Model)
+	require.Equal(t, "chat", class.TaskType)
+	// same analyzer called twice: initial + repair. No failover to b-mini.
+	require.Equal(t, []string{"a-mini", "a-mini"}, exec.calls)
+}
+
+func TestClassifier_RepairFailureFallsBackToNextAnalyzer(t *testing.T) {
+	exec := &fakeExecutor{
+		responseSeq: map[string][]string{
+			"a-mini": {"not json at all", "still not json"},
+			"b-mini": {validClassification},
+		},
+	}
+	cls, err := NewClassifier(exec, []AnalyzerConfig{{Model: "a-mini"}, {Model: "b-mini"}}, 0, 0, "")
+	require.NoError(t, err)
+
+	class, used, err := cls.Classify(context.Background(), &core.ChatRequest{
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "b-mini", used.Model)
+	require.Equal(t, "chat", class.TaskType)
+	// a-mini initial + repair, then failover to b-mini.
+	require.Equal(t, []string{"a-mini", "a-mini", "b-mini"}, exec.calls)
 }
