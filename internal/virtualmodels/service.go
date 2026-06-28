@@ -21,6 +21,12 @@ type Service struct {
 	catalog        Catalog
 	defaultEnabled bool
 
+	// configModels are virtual models supplied declaratively (config.yaml / env).
+	// They are merged over the store rows on every refresh, override store rows of
+	// the same source, and are read-only to the admin API.
+	configModels []VirtualModel
+
+	balancer  roundRobin
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
 }
@@ -63,11 +69,72 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list virtual models: %w", err)
 	}
-	next, err := buildSnapshot(rows, s.defaultEnabled)
+	next, err := buildSnapshot(s.mergeConfigModels(rows), s.defaultEnabled)
 	if err != nil {
 		return err
 	}
 	s.current.Store(next)
+	s.balancer.prune(next.redirects)
+	return nil
+}
+
+// SetConfigModels installs the declarative (config.yaml / VIRTUAL_MODELS) virtual
+// models that override store rows of the same source. Call it before the first
+// Refresh, then ValidateManagedConfig to reject invalid declarations at startup.
+func (s *Service) SetConfigModels(models []VirtualModel) {
+	cloned := make([]VirtualModel, 0, len(models))
+	for _, model := range models {
+		model.Managed = true
+		cloned = append(cloned, model.clone())
+	}
+	s.configModels = cloned
+}
+
+// mergeConfigModels overlays the config-managed rows onto the store rows. A
+// managed row replaces a store row of the same source, keeping config the source
+// of truth for the entries it defines.
+func (s *Service) mergeConfigModels(stored []VirtualModel) []VirtualModel {
+	if len(s.configModels) == 0 {
+		return stored
+	}
+	merged := make([]VirtualModel, 0, len(stored)+len(s.configModels))
+	for _, row := range stored {
+		if s.isManagedSource(row.Source) {
+			continue
+		}
+		merged = append(merged, row)
+	}
+	return append(merged, s.configModels...)
+}
+
+// isManagedSource reports whether source is owned by a declarative config row.
+func (s *Service) isManagedSource(source string) bool {
+	source = strings.TrimSpace(source)
+	for _, model := range s.configModels {
+		if strings.TrimSpace(model.Source) == source {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateManagedConfig checks that every declarative config redirect satisfies
+// the admin redirect invariants (no self- or cross-redirect target, each target
+// catalog-supported), so an invalid IaC entry fails startup loudly. Call it once
+// after the initial Refresh; the config set never changes afterward, so it is
+// not re-run on the background ticker — there a transient provider-catalog gap
+// must not freeze the snapshot, and an unavailable managed target is simply
+// skipped at resolve time like any other redirect target.
+func (s *Service) ValidateManagedConfig() error {
+	current := s.snapshot()
+	for _, vm := range current.bySource {
+		if !vm.Managed || !vm.IsRedirect() {
+			continue
+		}
+		if err := s.validateRedirectTarget(current, vm); err != nil {
+			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
+		}
+	}
 	return nil
 }
 
@@ -136,21 +203,39 @@ func (s *Service) ListViews() []View {
 			UserPaths:    vm.UserPaths,
 			Description:  vm.Description,
 			Enabled:      vm.Enabled,
+			Managed:      vm.Managed,
 			CreatedAt:    vm.CreatedAt,
 			UpdatedAt:    vm.UpdatedAt,
 		}
 		if vm.IsRedirect() {
-			if selector, err := vm.targetSelector(); err == nil {
-				view.ResolvedModel = selector.QualifiedModel()
-				view.ProviderType = strings.TrimSpace(s.catalog.GetProviderType(view.ResolvedModel))
-				view.Valid = s.catalog.Supports(view.ResolvedModel)
-			}
+			view.ResolvedModel, view.ProviderType, view.Valid = s.redirectViewResolution(vm)
 		} else {
 			view.ScopeKind = string(scopeKindFor(vm.Source, vm.ProviderName, vm.Model))
 		}
 		views = append(views, view)
 	}
 	return views
+}
+
+// redirectViewResolution summarizes a redirect for the admin view: a
+// representative resolved model (the first catalog-supported target, else the
+// first declared one), its provider type, and whether any target is available.
+func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerType string, valid bool) {
+	for _, target := range vm.Targets {
+		selector, err := target.selector()
+		if err != nil {
+			continue
+		}
+		qualified := selector.QualifiedModel()
+		if s.catalog.Supports(qualified) {
+			return qualified, strings.TrimSpace(s.catalog.GetProviderType(qualified)), true
+		}
+		if resolved == "" {
+			resolved = qualified
+			providerType = strings.TrimSpace(s.catalog.GetProviderType(qualified))
+		}
+	}
+	return resolved, providerType, valid
 }
 
 // Upsert validates and stores one virtual model, then refreshes the in-memory
@@ -163,6 +248,9 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	normalized, err := s.normalizeForUpsert(vm)
 	if err != nil {
 		return err
+	}
+	if s.isManagedSource(normalized.Source) || s.isManagedSource(vm.Source) {
+		return managedSourceError(normalized.Source)
 	}
 
 	s.refreshMu.Lock()
@@ -183,21 +271,77 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	if err := s.store.Upsert(ctx, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
+	return s.commitRefresh(ctx, map[string]*VirtualModel{
+		normalized.Source: priorRow(previous, existed),
+	})
+}
+
+// Rename moves an existing virtual model to a new source: it stores the row
+// under the new source and removes the old one, validating and refreshing like
+// Upsert with rollback on failure. A no-op rename (old == new after
+// normalization) delegates to Upsert. The new source must be free — renaming
+// onto an existing row is rejected rather than silently overwriting it, since
+// source is the primary key on every store backend.
+func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel) error {
+	if s == nil {
+		return fmt.Errorf("virtual models service is required")
+	}
+	oldSource = strings.TrimSpace(oldSource)
+	if oldSource == "" {
+		return newValidationError("source is required", nil)
+	}
+
+	normalized, err := s.normalizeForUpsert(vm)
+	if err != nil {
+		return err
+	}
+	if normalized.Source == oldSource {
+		// Not actually a rename; fall back to a plain update under the same key.
+		return s.Upsert(ctx, vm)
+	}
+	if s.isManagedSource(oldSource) || s.isManagedSource(normalized.Source) || s.isManagedSource(vm.Source) {
+		return managedSourceError(normalized.Source)
+	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	current := s.snapshot()
+	previous, oldExisted := current.bySource[oldSource]
+	if !oldExisted {
+		return ErrNotFound
+	}
+	if _, taken := current.bySource[normalized.Source]; taken {
+		return newValidationError(fmt.Sprintf("virtual model %q already exists; choose a different source", normalized.Source), nil)
+	}
+	if err := s.validateRedirectTarget(current, normalized); err != nil {
+		return err
+	}
+	rows := upsertRow(removeRow(current.rows(), oldSource), normalized)
+	if _, err := buildSnapshot(rows, s.defaultEnabled); err != nil {
+		return fmt.Errorf("validate virtual models: %w", err)
+	}
+
+	if err := s.store.Upsert(ctx, normalized); err != nil {
+		return fmt.Errorf("upsert virtual model: %w", err)
+	}
+	// Restoring the new source means deleting it (it did not exist before); the
+	// old source is restored to its prior row.
+	prior := map[string]*VirtualModel{
+		normalized.Source: nil,
+		oldSource:         &previous,
+	}
+	if err := s.store.Delete(ctx, oldSource); err != nil {
+		// The new row is in but the old one survives; undo so the rename leaves
+		// no duplicate behind.
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
-		var rollbackErr error
-		if existed {
-			rollbackErr = s.store.Upsert(rollbackCtx, previous)
-		} else {
-			rollbackErr = s.store.Delete(rollbackCtx, normalized.Source)
+		if rollbackErr := s.restore(rollbackCtx, prior); rollbackErr != nil {
+			return fmt.Errorf("delete old virtual model: %w (rollback failed: %v)", err, rollbackErr)
 		}
-		if rollbackErr != nil {
-			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("refresh virtual models: %w", err)
+		return fmt.Errorf("delete old virtual model: %w", err)
 	}
-	return nil
+	return s.commitRefresh(ctx, prior)
 }
 
 // Delete removes one virtual model and refreshes the in-memory snapshot.
@@ -218,6 +362,9 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	if !existed {
 		return ErrNotFound
 	}
+	if previous.Managed || s.isManagedSource(canonical) {
+		return managedSourceError(canonical)
+	}
 	source = canonical
 
 	if err := s.store.Delete(ctx, source); err != nil {
@@ -226,15 +373,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 		}
 		return fmt.Errorf("delete virtual model: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
-		rollbackCtx, cancel := rollbackContext()
-		defer cancel()
-		if rollbackErr := s.store.Upsert(rollbackCtx, previous); rollbackErr != nil {
-			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("refresh virtual models: %w", err)
-	}
-	return nil
+	return s.commitRefresh(ctx, map[string]*VirtualModel{source: &previous})
 }
 
 func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
@@ -258,28 +397,38 @@ func (s *Service) ensureSourceKind(current snapshot, source string, wantRedirect
 	return crossKindError(source, wantRedirect)
 }
 
-// validateRedirectTarget enforces redirect-specific rules: a redirect cannot
-// target itself, cannot target another redirect's source, and must resolve to a
-// catalog-supported model.
+// validateRedirectTarget enforces redirect-specific rules for every target: a
+// redirect cannot target itself, cannot target another redirect's source, and
+// each target must resolve to a catalog-supported model.
 func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
 	if !vm.IsRedirect() {
 		return nil
 	}
-	target, err := vm.targetSelector()
-	if err != nil {
-		return newValidationError("invalid target selector: "+err.Error(), err)
-	}
-	qualified := target.QualifiedModel()
-	if vm.Source == qualified {
-		return newValidationError(fmt.Sprintf("alias %q cannot target itself", vm.Source), nil)
-	}
-	if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
-		return newValidationError(fmt.Sprintf("alias target %q refers to another alias", qualified), nil)
-	}
-	if !s.catalog.Supports(qualified) {
-		return newValidationError("target model not found: "+qualified, nil)
+	for _, target := range vm.Targets {
+		selector, err := target.selector()
+		if err != nil {
+			return newValidationError("invalid target selector: "+err.Error(), err)
+		}
+		qualified := selector.QualifiedModel()
+		if vm.Source == qualified {
+			return newValidationError(fmt.Sprintf("virtual model %q cannot target itself", vm.Source), nil)
+		}
+		if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
+			return newValidationError(fmt.Sprintf("target %q refers to another virtual model", qualified), nil)
+		}
+		if !s.catalog.Supports(qualified) {
+			return newValidationError("target model not found: "+qualified, nil)
+		}
 	}
 	return nil
+}
+
+// managedSourceError is returned when the admin API tries to write a virtual
+// model that is owned declaratively by config.yaml or the VIRTUAL_MODELS env var.
+func managedSourceError(source string) error {
+	return newValidationError(fmt.Sprintf(
+		"virtual model %q is managed by config.yaml or VIRTUAL_MODELS and cannot be changed from the admin API; edit your configuration instead",
+		source), nil)
 }
 
 func upsertRow(rows []VirtualModel, next VirtualModel) []VirtualModel {
@@ -292,8 +441,68 @@ func upsertRow(rows []VirtualModel, next VirtualModel) []VirtualModel {
 	return append(rows, next.clone())
 }
 
+func removeRow(rows []VirtualModel, source string) []VirtualModel {
+	out := make([]VirtualModel, 0, len(rows))
+	for _, row := range rows {
+		if row.Source != source {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func rollbackContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+// commitRefresh refreshes the snapshot after a store write succeeds and restores
+// the touched rows if the refresh fails, so a failed refresh never leaves the
+// store ahead of the in-memory snapshot. prior maps each touched source to its
+// state before the write — a nil row means the source did not exist and is
+// deleted on rollback.
+func (s *Service) commitRefresh(ctx context.Context, prior map[string]*VirtualModel) error {
+	if err := s.refreshLocked(ctx); err != nil {
+		rollbackCtx, cancel := rollbackContext()
+		defer cancel()
+		if rollbackErr := s.restore(rollbackCtx, prior); rollbackErr != nil {
+			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("refresh virtual models: %w", err)
+	}
+	return nil
+}
+
+// restore returns each source in prior to its captured state: re-upserting a row
+// that existed, or deleting one that did not (nil). It is best-effort — every
+// entry is attempted and the errors are joined, so one failure never leaves the
+// other touched rows unrepaired.
+func (s *Service) restore(ctx context.Context, prior map[string]*VirtualModel) error {
+	var restoreErr error
+	for source, row := range prior {
+		var err error
+		if row == nil {
+			// The source did not exist before; an already-absent row is the
+			// intended end state, not a rollback failure.
+			if err = s.store.Delete(ctx, source); errors.Is(err, ErrNotFound) {
+				err = nil
+			}
+		} else {
+			err = s.store.Upsert(ctx, *row)
+		}
+		if err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore virtual model %q: %w", source, err))
+		}
+	}
+	return restoreErr
+}
+
+// priorRow captures a row's pre-write state for restore: the row itself when it
+// existed, or nil when it did not.
+func priorRow(row VirtualModel, existed bool) *VirtualModel {
+	if !existed {
+		return nil
+	}
+	return &row
 }
 
 // Compile-time check that *Service satisfies the resolver, user-path resolver,

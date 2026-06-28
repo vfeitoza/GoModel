@@ -258,6 +258,60 @@ func TestUpsertAndDeleteRedirectVirtualModel(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelRenamesViaOldSource(t *testing.T) {
+	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", false))
+	e := echo.New()
+
+	body := `{"source":"smarter","old_source":"smart","target_model":"openai/gpt-4o"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(rename) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode rename response: %v", err)
+	}
+	if view.Source != "smarter" || view.Kind != virtualmodels.KindRedirect {
+		t.Fatalf("view = %#v, want redirect smarter", view)
+	}
+	// The omitted enabled flag is carried over from the old row (disabled).
+	if view.Enabled {
+		t.Fatalf("rename flipped a disabled redirect to enabled: %#v", view)
+	}
+	// The old source no longer exists.
+	if _, ok := h.virtualModels.Get("smart"); ok {
+		t.Fatalf("old source still present after rename")
+	}
+}
+
+func TestUpsertVirtualModelRejectsRenameOntoExisting(t *testing.T) {
+	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", true), redirectVM("taken", "openai/gpt-4o", true))
+	e := echo.New()
+
+	body := `{"source":"taken","old_source":"smart","target_model":"openai/gpt-4o"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(rename conflict) error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("rename conflict status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	// Both rows survive the rejected rename.
+	if _, ok := h.virtualModels.Get("smart"); !ok {
+		t.Fatalf("source smart was lost after a rejected rename")
+	}
+	if _, ok := h.virtualModels.Get("taken"); !ok {
+		t.Fatalf("source taken was lost after a rejected rename")
+	}
+}
+
 func TestUpsertPolicyVirtualModelAcceptsEmptyUserPaths(t *testing.T) {
 	h := newVMHandler(t)
 	e := echo.New()
@@ -305,6 +359,63 @@ func TestUpsertVirtualModelPreservesEnabledWhenOmitted(t *testing.T) {
 	}
 	if view.Description != "after" {
 		t.Fatalf("description = %q, want after", view.Description)
+	}
+}
+
+func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
+	catalog := newVMTestCatalog()
+	catalog.add("openai/gpt-4o", "openai")
+	catalog.add("groq/llama", "groq")
+	service := newVMService(t, catalog, newVMTestStore(), true)
+	h := NewHandler(nil, nil, WithVirtualModels(service))
+	e := echo.New()
+
+	body := `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if view.Kind != virtualmodels.KindRedirect {
+		t.Fatalf("kind = %q, want redirect", view.Kind)
+	}
+	if len(view.Targets) != 2 {
+		t.Fatalf("targets = %d, want 2 (%#v)", len(view.Targets), view.Targets)
+	}
+	if view.Strategy != virtualmodels.StrategyCost {
+		t.Fatalf("strategy = %q, want cost", view.Strategy)
+	}
+	if view.Targets[1].Weight != 2 {
+		t.Fatalf("target[1] weight = %v, want 2", view.Targets[1].Weight)
+	}
+}
+
+func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {
+	h := newVMHandler(t)
+	e := echo.New()
+
+	// A targets list whose only entry has an empty model must not be silently
+	// demoted to an access policy.
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","targets":[{"model":"  "}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if !containsString(rec.Body.String(), "invalid_request_error") {
+		t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
 	}
 }
 
