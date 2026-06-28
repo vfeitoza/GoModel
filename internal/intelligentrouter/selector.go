@@ -82,6 +82,12 @@ func normalizeMode(mode string) string {
 // Mode returns the active routing mode.
 func (s *Selector) Mode() string { return s.mode }
 
+// RecordExecution records the outcome of a provider call so the health tracker
+// can penalize or exclude unhealthy models in future routing decisions.
+func (s *Selector) RecordExecution(qualifiedModel string, success bool) {
+	RecordHealth(qualifiedModel, success)
+}
+
 // ShouldEvaluate reports whether the requested selector should trigger
 // intelligent routing. It returns the strategy to use and whether the request
 // is an intelligent virtual model (whose targets override the candidate filter).

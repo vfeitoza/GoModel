@@ -90,6 +90,27 @@ type IntelligentDefaults struct {
 	// MinConfidence is the minimum classifier confidence to switch to a
 	// cheaper model; below it a stronger model is chosen. Default: 0.7
 	MinConfidence float64 `yaml:"min_confidence" env:"INTELLIGENT_ROUTING_MIN_CONFIDENCE"`
+
+	// Health configures the health-based scoring dimension. Models with recent
+	// high error rates are penalized; once the weighted error rate crosses
+	// CircuitBreaker they are hard-excluded from the candidate pool.
+	Health IntelligentHealthConfig `yaml:"health"`
+}
+
+// IntelligentHealthConfig tunes the health-based scoring dimension.
+type IntelligentHealthConfig struct {
+	// Window is the observation window for health metrics. Default: 20m
+	Window time.Duration `yaml:"window" env:"INTELLIGENT_ROUTING_HEALTH_WINDOW"`
+
+	// HalfLife controls how quickly old entries decay. Default: 5m
+	HalfLife time.Duration `yaml:"half_life" env:"INTELLIGENT_ROUTING_HEALTH_HALF_LIFE"`
+
+	// PseudoCounts is the Bayesian smoothing factor. Default: 2.0
+	PseudoCounts float64 `yaml:"pseudo_counts" env:"INTELLIGENT_ROUTING_HEALTH_PSEUDO_COUNTS"`
+
+	// CircuitBreaker is the weighted error rate above which a model is hard-excluded.
+	// Range [0,1]. Default: 0.9
+	CircuitBreaker float64 `yaml:"circuit_breaker" env:"INTELLIGENT_ROUTING_HEALTH_CIRCUIT_BREAKER"`
 }
 
 // IntelligentSelectorConfig maps an intelligent selector name to a strategy.
@@ -250,6 +271,18 @@ func applyIntelligentRoutingDefaults(d *IntelligentDefaults) {
 	}
 	if d.MinConfidence == 0 {
 		d.MinConfidence = 0.7
+	}
+	if d.Health.Window == 0 {
+		d.Health.Window = 20 * time.Minute
+	}
+	if d.Health.HalfLife == 0 {
+		d.Health.HalfLife = 5 * time.Minute
+	}
+	if d.Health.PseudoCounts == 0 {
+		d.Health.PseudoCounts = 2.0
+	}
+	if d.Health.CircuitBreaker == 0 {
+		d.Health.CircuitBreaker = 0.9
 	}
 }
 

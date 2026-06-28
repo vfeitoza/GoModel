@@ -31,6 +31,9 @@ type InferenceConfig struct {
 type IntelligentRouter interface {
 	ShouldEvaluate(requested core.RequestedModelSelector, meta intelligentrouter.SelectionMeta) (strategy string, ok bool)
 	Evaluate(ctx context.Context, req *core.ChatRequest, requested core.RequestedModelSelector, meta intelligentrouter.SelectionMeta) *intelligentrouter.Decision
+	// RecordExecution records a provider call outcome for health-based scoring.
+	// qualifiedModel must be a fully qualified selector (provider/model).
+	RecordExecution(qualifiedModel string, success bool)
 }
 
 // InferenceOrchestrator owns translated inference workflow resolution, request

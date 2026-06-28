@@ -3,15 +3,33 @@ package intelligentrouter
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"gomodel/internal/core"
 )
 
 // ScoreCandidate is a candidate paired with its computed score.
 type ScoreCandidate struct {
-	Candidate Candidate
-	Score     float64
-	UnitCost  float64 // estimated per-1M-token blended cost, for reporting
+	Candidate   Candidate
+	Score       float64
+	UnitCost    float64 // estimated per-1M-token blended cost, for reporting
+	HealthScore float64 // 1.0 = healthy, 0.0 = circuit breaker tripped
+}
+
+// HealthConfig parameterises the health dimension of the scorer.
+type HealthConfig struct {
+	Window         time.Duration
+	HalfLife       time.Duration
+	PseudoCounts   float64
+	CircuitBreaker float64
+}
+
+// defaultHealthConfig is used when RankCandidates is called without explicit health settings.
+var defaultHealthConfig = HealthConfig{
+	Window:         healthDefaultWindow,
+	HalfLife:       healthDefaultHalfLife,
+	PseudoCounts:   healthDefaultPseudoCounts,
+	CircuitBreaker: healthDefaultCircuitBreaker,
 }
 
 // RankCandidates scores and sorts candidates for the given strategy and
@@ -19,27 +37,65 @@ type ScoreCandidate struct {
 // all candidates at once so it can abstain (contribute nothing) when no
 // candidate has a discriminating price signal, and so a free model can cap the
 // paid ones proportionally instead of treating zero cost as unknown.
+//
+// Models whose circuit breaker has tripped (HealthScore == 0) are excluded from
+// the ranked list before any scoring occurs.
 func RankCandidates(candidates []Candidate, pricing PricingResolver, strategy string, class Classification) []ScoreCandidate {
+	return RankCandidatesWithHealth(candidates, pricing, strategy, class, defaultHealthConfig)
+}
+
+// RankCandidatesWithHealth is the full entry point used by the Selector.
+func RankCandidatesWithHealth(candidates []Candidate, pricing PricingResolver, strategy string, class Classification, healthCfg HealthConfig) []ScoreCandidate {
 	strategy = normalizeStrategy(strategy)
 
 	costScores := computeCostScores(candidates, pricing)
 
-	scored := make([]ScoreCandidate, 0, len(candidates))
+	now := time.Now()
+	var scored []ScoreCandidate
 	for i, c := range candidates {
-		scored = append(scored, ScoreCandidate{
-			Candidate: c,
-			Score:     scoreCandidate(c.Model, costScores[i], c.ContextScore, strategy, class),
-			UnitCost:  estimateUnitCost(c.Model, pricing),
-		})
+		qualifiedID := c.Selector.QualifiedModel()
+		healthScore := ModelHealthScore(qualifiedID, now, healthCfg.Window, healthCfg.HalfLife, healthCfg.PseudoCounts, healthCfg.CircuitBreaker)
+		if healthScore <= 0 {
+			// Circuit breaker tripped — hard-exclude this candidate.
+			continue
+		}
+		sc := ScoreCandidate{
+			Candidate:   c,
+			Score:       scoreCandidate(c.Model, costScores[i], c.ContextScore, strategy, class),
+			UnitCost:    estimateUnitCost(c.Model, pricing),
+			HealthScore: healthScore,
+		}
+		// Apply health penalty: blend keeps some raw score for degraded but
+		// non-tripped models, so a temporarily-struggling model isn't silently
+		// pushed to last place by a tie-break alone.
+		sc.Score *= healthFitFactor(healthScore)
+		scored = append(scored, sc)
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
 		if scored[i].Score != scored[j].Score {
 			return scored[i].Score > scored[j].Score
 		}
-		// Tie-break: cheaper first.
+		// Tie-break: healthier first, then cheaper.
+		if scored[i].HealthScore != scored[j].HealthScore {
+			return scored[i].HealthScore > scored[j].HealthScore
+		}
 		return scored[i].UnitCost < scored[j].UnitCost
 	})
 	return scored
+}
+
+// healthFitFactor maps a health score to a raw-score multiplier.
+// A score of 1.0 leaves the result unchanged; a near-zero score applies a
+// floor of 0.7 so that a struggling (but not broken) model is penalized
+// without being collapsed to near-zero when other signals are strong.
+func healthFitFactor(healthScore float64) float64 {
+	if healthScore <= 0 {
+		return 0
+	}
+	if healthScore >= 1 {
+		return 1
+	}
+	return 0.7 + 0.3*healthScore
 }
 
 func normalizeStrategy(strategy string) string {

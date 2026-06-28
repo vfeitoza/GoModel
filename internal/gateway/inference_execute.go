@@ -334,6 +334,18 @@ func executeWithUsage[Resp any](
 	o.logUsage(ctx, workflow, pricingModel, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return entry(resp, providerType, pricing)
 	})
+	// Record execution outcomes for health-based scoring so the intelligent
+	// router can penalize or exclude models with recent high error rates.
+	if !isNilIntelligentRouter(o.intelligentRouter) {
+		successModel := qualifiedHealthKey(providerName, model)
+		if usedFallback && requestedModel != "" {
+			// The primary model was tried and failed; credit the fallback winner.
+			o.intelligentRouter.RecordExecution(qualifiedHealthKey(providerName, requestedModel), false)
+		}
+		if successModel != "" {
+			o.intelligentRouter.RecordExecution(successModel, true)
+		}
+	}
 	return resp, ExecutionMeta{
 		ProviderType:  providerType,
 		ProviderName:  providerName,
@@ -341,6 +353,18 @@ func executeWithUsage[Resp any](
 		FailoverModel: failoverModel,
 		UsedFallback:  usedFallback,
 	}, nil
+}
+
+func qualifiedHealthKey(providerName, model string) string {
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if providerName == "" {
+		return model
+	}
+	return providerName + "/" + model
 }
 
 func requestModel[Req any](req Req, model func(Req) string) string {
