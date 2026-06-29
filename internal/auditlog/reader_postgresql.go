@@ -9,12 +9,18 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type postgreSQLQueryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // PostgreSQLReader implements Reader for PostgreSQL databases.
 type PostgreSQLReader struct {
-	pool *pgxpool.Pool
+	pool postgreSQLQueryer
 }
 
 // NewPostgreSQLReader creates a new PostgreSQL audit log reader.
@@ -115,9 +121,10 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		var authKeyID *string
 		var authMethod *string
 		var userPath *string
+		var errorType *string
 
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
-			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &e.ErrorType, &dataJSON); err != nil {
+			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &errorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
 		if workflowVersionID != nil {
@@ -139,6 +146,9 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		}
 		if userPath != nil {
 			e.UserPath = *userPath
+		}
+		if errorType != nil {
+			e.ErrorType = *errorType
 		}
 
 		if dataJSON != nil && *dataJSON != "" {
@@ -257,9 +267,10 @@ func scanPostgreSQLLogEntry(rows interface {
 	var authKeyID *string
 	var authMethod *string
 	var userPath *string
+	var errorType *string
 
 	if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
-		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &e.ErrorType, &dataJSON); err != nil {
+		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &errorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
 	if workflowVersionID != nil {
@@ -281,6 +292,9 @@ func scanPostgreSQLLogEntry(rows interface {
 	}
 	if userPath != nil {
 		e.UserPath = *userPath
+	}
+	if errorType != nil {
+		e.ErrorType = *errorType
 	}
 
 	if dataJSON != nil && *dataJSON != "" {
