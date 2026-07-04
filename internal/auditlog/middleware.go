@@ -467,6 +467,26 @@ func EnrichEntryWithResponseBody(c *echo.Context, body any) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithRequestRevision appends one ingress request-rewrite revision
+// to the live audit entry, assigning the next sequence number. A missing
+// entry is a no-op.
+func EnrichEntryWithRequestRevision(c *echo.Context, revision RequestRevisionSnapshot) {
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	revision.Seq = len(data.RequestRevisions) + 1
+	data.RequestRevisions = append(data.RequestRevisions, revision)
+	publishLiveAuditUpdate(c, entry)
+}
+
+// CaptureLoggedBody converts raw body bytes into the representation audit
+// entries store: parsed JSON when possible, otherwise a valid-UTF-8 string.
+func CaptureLoggedBody(bodyBytes []byte) any {
+	return captureLoggedBody(bodyBytes)
+}
+
 // entryFromContext returns the live audit entry stored on the request context,
 // or nil when audit logging is inactive for the request.
 func entryFromContext(c *echo.Context) *LogEntry {
