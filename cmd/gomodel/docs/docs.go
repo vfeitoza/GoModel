@@ -4380,7 +4380,7 @@ const docTemplate = `{
         },
         "/v1/realtime": {
             "get": {
-                "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway.",
+                "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway. Passing ?call_id= instead attaches to an existing WebRTC/SIP call as a sideband channel; calls created through this gateway instance are routed automatically, others need explicit model (and provider) parameters.",
                 "tags": [
                     "realtime"
                 ],
@@ -4388,15 +4388,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model that owns the realtime session",
+                        "description": "Model that owns the realtime session (required unless call_id names a call created through this gateway instance)",
                         "name": "model",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     },
                     {
                         "type": "string",
                         "description": "Optional provider hint",
                         "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Existing WebRTC/SIP call to attach to as a sideband channel",
+                        "name": "call_id",
                         "in": "query"
                     }
                 ],
@@ -4415,6 +4420,185 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/realtime/calls": {
+            "post": {
+                "description": "OpenAI-compatible WebRTC SDP exchange. Accepts a raw application/sdp offer with the model in the ?model= query parameter, or a multipart form with sdp and session (JSON) fields. The gateway routes by model, injects provider credentials, and relays the SDP answer; the Location header carries the created call id. Media flows directly between the client and the provider, so usage is recorded by a gateway-side sideband observer when usage tracking is enabled.",
+                "consumes": [
+                    "application/sdp",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/sdp",
+                    "application/json"
+                ],
+                "tags": [
+                    "realtime"
+                ],
+                "summary": "Create a realtime WebRTC call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model that owns the call (required for application/sdp offers)",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional provider hint",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "SDP answer",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/realtime/client_secrets": {
+            "post": {
+                "description": "OpenAI-compatible ephemeral credential minting for browser and mobile realtime clients. Routes by session.model (or the transcription model for transcription sessions), applies the same model-access, budget, and rate-limit gates as other model endpoints, and relays the provider response verbatim. The minted secret authenticates the client directly against the provider, bypassing the gateway for the session itself.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "realtime"
+                ],
+                "summary": "Mint an ephemeral realtime client secret",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Optional provider hint",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; additional fields are relayed verbatim",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "expires_after": {
+                                    "type": "object"
+                                },
+                                "session": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Provider client secret response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
