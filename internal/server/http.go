@@ -110,7 +110,16 @@ type ReadinessProbe interface {
 
 // New creates a new HTTP server
 func New(provider core.RoutableProvider, cfg *Config) *Server {
-	e := echo.New()
+	// The router-level NotFoundHandler fires only when no route matches the
+	// path at all, so unknown routes get a dialect-aware canonical error
+	// envelope while echo's 405 handling for known paths stays intact (a
+	// wildcard RouteNotFound route would shadow it and turn 405s into 404s).
+	e := echo.NewWithConfig(echo.Config{
+		Router: echo.NewRouter(echo.RouterConfig{
+			AllowOverwritingRoute: true,
+			NotFoundHandler:       handleRouteNotFound,
+		}),
+	})
 	e.Logger = slog.Default()
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
